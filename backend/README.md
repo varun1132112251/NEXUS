@@ -47,4 +47,5 @@ Alembic is configured to read `DATABASE_URL` from the application settings.
 alembic upgrade head
 ```
 
-The first domain model is `User`; authentication and passwords remain out of scope.
+The `User` model stores Argon2id password hashes, and user creation requires a
+password. Login, tokens, OAuth, and authorization remain out of scope.

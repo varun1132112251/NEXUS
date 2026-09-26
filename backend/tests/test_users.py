@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
 
+from app.core.security import verify_password
 from app.db.session import get_db
 from app.main import app
 from app.models.user import User
@@ -51,9 +52,12 @@ class ScalarResult:
 
 
 @pytest.fixture
-def client() -> TestClient:
-    session = InMemorySession()
+def session() -> InMemorySession:
+    return InMemorySession()
 
+
+@pytest.fixture
+def client(session: InMemorySession) -> TestClient:
     def override_get_db():
         yield session
 
@@ -63,8 +67,13 @@ def client() -> TestClient:
     app.dependency_overrides.clear()
 
 
-def test_create_user(client: TestClient) -> None:
-    response = client.post("/api/v1/users", json={"username": "ada", "email": "ada@example.com"})
+def test_create_user_hashes_password_and_omits_it_from_response(
+    client: TestClient, session: InMemorySession
+) -> None:
+    response = client.post(
+        "/api/v1/users",
+        json={"username": "ada", "email": "ada@example.com", "password": "correct horse"},
+    )
 
     assert response.status_code == 201
     body = response.json()
@@ -73,27 +82,58 @@ def test_create_user(client: TestClient) -> None:
     assert body["id"]
     assert body["created_at"]
     assert body["updated_at"]
+    assert {"password", "password_hash"}.isdisjoint(body)
 
-
-def test_list_users(client: TestClient) -> None:
-    client.post("/api/v1/users", json={"username": "ada", "email": "ada@example.com"})
-    client.post("/api/v1/users", json={"username": "grace", "email": "grace@example.com"})
-
-    response = client.get("/api/v1/users")
-
-    assert response.status_code == 200
-    assert [user["username"] for user in response.json()] == ["ada", "grace"]
+    stored_hash = session.users[0].password_hash
+    assert stored_hash != "correct horse"
+    assert verify_password("correct horse", stored_hash)
 
 
 @pytest.mark.parametrize(
     "payload",
     [
-        {"username": "ada", "email": "other@example.com"},
-        {"username": "other", "email": "ada@example.com"},
+        {"username": "ada", "email": "ada@example.com"},
+        {"username": "ada", "email": "ada@example.com", "password": "short"},
+    ],
+)
+def test_create_user_requires_password_of_at_least_eight_characters(
+    client: TestClient, payload: dict[str, str]
+) -> None:
+    response = client.post("/api/v1/users", json=payload)
+
+    assert response.status_code == 422
+
+
+def test_list_users(client: TestClient) -> None:
+    client.post(
+        "/api/v1/users",
+        json={"username": "ada", "email": "ada@example.com", "password": "correct horse"},
+    )
+    client.post(
+        "/api/v1/users",
+        json={"username": "grace", "email": "grace@example.com", "password": "correct horse"},
+    )
+
+    response = client.get("/api/v1/users")
+
+    assert response.status_code == 200
+    users = response.json()
+    assert [user["username"] for user in users] == ["ada", "grace"]
+    assert all({"password", "password_hash"}.isdisjoint(user) for user in users)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"username": "ada", "email": "other@example.com", "password": "correct horse"},
+        {"username": "other", "email": "ada@example.com", "password": "correct horse"},
     ],
 )
 def test_create_user_rejects_duplicate_username_or_email(client: TestClient, payload: dict[str, str]) -> None:
-    client.post("/api/v1/users", json={"username": "ada", "email": "ada@example.com"})
+    client.post(
+        "/api/v1/users",
+        json={"username": "ada", "email": "ada@example.com", "password": "correct horse"},
+    )
 
     response = client.post("/api/v1/users", json=payload)
 

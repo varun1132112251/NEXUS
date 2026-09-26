@@ -3,6 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.security import hash_password
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.user import UserCreate, UserRead
@@ -12,7 +13,8 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 @router.post("", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 def create_user(user_in: UserCreate, db: Session = Depends(get_db)) -> User:
-    user = User(**user_in.model_dump())
+    user_data = user_in.model_dump(exclude={"password"})
+    user = User(**user_data, password_hash=hash_password(user_in.password))
     db.add(user)
     try:
         db.commit()
