@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     environment: str = "local"
     debug: bool = False
     database_url: str = "postgresql+psycopg://nexus:nexus@localhost:5432/nexus"
+    jwt_secret_key: str
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 60
 
 
 @lru_cache

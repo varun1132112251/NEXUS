@@ -19,7 +19,10 @@ python -m pip install -e ".[dev]"
 Copy-Item .env.example .env
 ```
 
-Adjust `DATABASE_URL` in `.env` for your local PostgreSQL instance.
+Set `JWT_SECRET_KEY` in `.env` to a long, randomly generated secret before
+starting the API. The application requires this value and has no fallback.
+Keep `.env` local; it is ignored by Git. Also adjust `DATABASE_URL` for your
+local PostgreSQL instance.
 
 ## Run the API
 
