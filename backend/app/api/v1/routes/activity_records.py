@@ -10,6 +10,7 @@ from app.models.activity_record import ActivityRecord
 from app.models.habit import Habit
 from app.models.project import Project
 from app.models.task import Task
+from app.models.target import Target
 from app.models.time_session import TimeSession
 from app.models.user import User
 from app.schemas.activity_record import ActivityRecordCreate, ActivityRecordRead
@@ -33,6 +34,8 @@ def validate_links(db: Session, payload: ActivityRecordCreate, user_id: UUID):
         owned(db, Habit, payload.habit_id, user_id)
     if payload.project_id is not None:
         owned(db, Project, payload.project_id, user_id)
+    if payload.target_id is not None:
+        owned(db, Target, payload.target_id, user_id)
 
 
 @router.post("", response_model=ActivityRecordRead, status_code=status.HTTP_201_CREATED)
@@ -44,6 +47,9 @@ def create(
     validate_links(db, payload, user.id)
     item = ActivityRecord(user_id=user.id, **payload.model_dump(exclude_none=True))
     db.add(item)
+    if payload.target_id is not None and payload.contribution_value is not None:
+        target = owned(db, Target, payload.target_id, user.id)
+        target.current_value += payload.contribution_value
     db.commit()
     db.refresh(item)
     return item
@@ -70,6 +76,8 @@ def list_records(
         query = query.where(ActivityRecord.task_id == task_id)
     if time_session_id is not None:
         query = query.where(ActivityRecord.time_session_id == time_session_id)
+    if target_id is not None:
+        query = query.where(ActivityRecord.target_id == target_id)
     query = query.order_by(ActivityRecord.recorded_at.desc())
     return list(db.scalars(query).all())
 
