@@ -2,8 +2,10 @@
 
 from app.models.habit import Habit
 from app.models.project import Project
+from app.models.schedule import ScheduleItem
 from app.models.target import Target
 from app.models.task import Task
+from app.models.time_session import TimeSession
 from app.models.user import User
 
-__all__ = ["User", "Target", "Habit", "Project", "Task"]
+__all__ = ["User", "Target", "Habit", "Project", "Task", "ScheduleItem", "TimeSession"]
