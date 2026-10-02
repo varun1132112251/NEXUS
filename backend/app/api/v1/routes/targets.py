@@ -1,3 +1,4 @@
+from datetime import date
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
@@ -21,8 +22,16 @@ def create_target(payload: TargetCreate, db: Session = Depends(get_db), user: Us
     db.add(target); db.commit(); db.refresh(target); return target
 
 @router.get("", response_model=list[TargetRead])
-def list_targets(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[Target]:
-    return list(db.scalars(select(Target).where(Target.user_id == user.id).order_by(Target.month, Target.created_at)).all())
+def list_targets(
+    month: date | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[Target]:
+    query = select(Target).where(Target.user_id == user.id)
+    if month is not None:
+        query = query.where(Target.month == month)
+    query = query.order_by(Target.month, Target.created_at)
+    return list(db.scalars(query).all())
 
 @router.patch("/{target_id}", response_model=TargetRead)
 def update_target(target_id: UUID, payload: TargetUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> Target:
