@@ -17,12 +17,27 @@ function api(path, options = {}, token) {
   });
 }
 
-const today = () => new Date().toISOString().slice(0, 10);
+const localDate = (d = new Date()) => {
+  const x = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  return x.toISOString().slice(0, 10);
+};
+const localDateTime = (d = new Date()) => {
+  const x = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  return x.toISOString().slice(0, 16);
+};
 const formatSeconds = (s = 0) => {
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
   return h ? `${h}h ${m}m` : m ? `${m}m` : `${sec}s`;
 };
 const formatClock = (iso) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+const isoFromLocal = (value) => {
+  const d = new Date(value);
+  const offset = -d.getTimezoneOffset();
+  const sign = offset >= 0 ? "+" : "-";
+  const hh = String(Math.floor(Math.abs(offset) / 60)).padStart(2, "0");
+  const mm = String(Math.abs(offset) % 60).padStart(2, "0");
+  return `${value}:00${sign}${hh}:${mm}`;
+};
 
 function Login({ onLogin }) {
   const [identifier, setIdentifier] = useState("");
@@ -67,28 +82,33 @@ function App() {
 }
 
 function Dashboard({ token, onLogout }) {
-  const [data, setData] = useState({ analytics: null, schedule: [], current: null, targets: [] });
+  const [view, setView] = useState("Overview");
+  const [data, setData] = useState({ analytics: null, schedule: [], current: null, targets: [], habits: [], history: [], diary: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [timerTitle, setTimerTitle] = useState("");
   const [now, setNow] = useState(Date.now());
 
-  const date = today();
+  const date = localDate();
+  const month = `${date.slice(0, 7)}-01`;
 
   async function load() {
     try {
       setError("");
-      const [analytics, schedule, current, targets] = await Promise.all([
+      const [analytics, schedule, current, targets, habits, history, diary] = await Promise.all([
         api(`/analytics/summary?start_date=${date}&end_date=${date}`, {}, token),
         api(`/schedule?scheduled_date=${date}`, {}, token),
         api("/time-sessions/current", {}, token),
-        api(`/targets?month=${date.slice(0,7)}-01`, {}, token),
+        api(`/targets?month=${month}`, {}, token),
+        api("/habits", {}, token),
+        api("/time-sessions", {}, token),
+        api(`/diary?entry_date=${date}`, {}, token),
       ]);
-      setData({ analytics, schedule, current, targets });
-      if (current && !timerTitle) setTimerTitle(current.title);
+      setData({ analytics, schedule, current, targets, habits, history, diary });
+      if (current) setTimerTitle(current.title);
     } catch (err) {
       setError(err.message);
-      if (err.message.toLowerCase().includes("token")) onLogout();
+      if (/token|authenticated|credentials/i.test(err.message)) onLogout();
     } finally { setLoading(false); }
   }
 
@@ -101,9 +121,7 @@ function Dashboard({ token, onLogout }) {
   async function startTimer() {
     if (!timerTitle.trim()) return;
     try {
-      await api("/time-sessions/start", {
-        method: "POST", body: JSON.stringify({ title: timerTitle.trim() })
-      }, token);
+      await api("/time-sessions/start", { method: "POST", body: JSON.stringify({ title: timerTitle.trim() }) }, token);
       await load();
     } catch (err) { setError(err.message); }
   }
@@ -121,14 +139,45 @@ function Dashboard({ token, onLogout }) {
     } catch (err) { setError(err.message); }
   }
 
-  const actualRunning = data.current
-    ? Math.max(0, Math.floor((now - new Date(data.current.started_at).getTime()) / 1000))
-    : 0;
+  async function createTarget(form) {
+    await api("/targets", { method: "POST", body: JSON.stringify({
+      title: form.title, description: form.description || null, month, target_value: Number(form.target_value)
+    }) }, token);
+    await load();
+  }
+
+  async function createSchedule(form) {
+    await api("/schedule", { method: "POST", body: JSON.stringify({
+      title: form.title, notes: form.notes || null, scheduled_date: form.scheduled_date,
+      start_at: isoFromLocal(form.start_at), end_at: isoFromLocal(form.end_at),
+      priority: Number(form.priority), status: "planned"
+    }) }, token);
+    await load();
+  }
+
+  async function createHabit(form) {
+    await api("/habits", { method: "POST", body: JSON.stringify({
+      name: form.name, description: form.description || null, category: form.category || "general", frequency: form.frequency || "daily"
+    }) }, token);
+    await load();
+  }
+
+  async function createDiary(form, existing) {
+    const body = {
+      accomplishments: form.accomplishments || null, what_went_badly: form.what_went_badly || null,
+      learned: form.learned || null, feelings: form.feelings || null, distractions: form.distractions || null,
+      tomorrow_changes: form.tomorrow_changes || null, free_writing: form.free_writing || null
+    };
+    if (existing) await api(`/diary/${existing.id}`, { method: "PATCH", body: JSON.stringify(body) }, token);
+    else await api("/diary", { method: "POST", body: JSON.stringify({ entry_date: date, ...body }) }, token);
+    await load();
+  }
+
+  const actualRunning = data.current ? Math.max(0, Math.floor((now - new Date(data.current.started_at).getTime()) / 1000)) : 0;
   const totals = data.analytics?.totals || {};
   const targets = data.analytics?.target_progress || data.targets.map(t => ({
     ...t, progress_percent: t.target_value ? Math.min(100, t.current_value / t.target_value * 100) : 0
   }));
-
   const greeting = useMemo(() => {
     const h = new Date().getHours();
     return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
@@ -136,74 +185,109 @@ function Dashboard({ token, onLogout }) {
 
   if (loading) return <div className="loading">Loading NEXUS<span>•</span><span>•</span><span>•</span></div>;
 
+  const nav = ["Overview", "Schedule", "Habits", "Targets", "History", "Diary"];
+
   return <div className="app-shell">
     <aside className="sidebar">
       <div className="logo"><span>N</span><strong>NEXUS</strong></div>
       <div className="side-label">COMMAND CENTER</div>
-      <nav>
-        <a className="active">Overview</a><a>Schedule</a><a>Habits</a><a>Targets</a><a>History</a><a>Diary</a>
-      </nav>
-      <div className="side-bottom">
-        <div className="system-status"><i /> System online</div>
-        <button className="ghost" onClick={onLogout}>Log out</button>
-      </div>
+      <nav>{nav.map(item => <button key={item} className={view === item ? "active" : ""} onClick={() => setView(item)}>{item}</button>)}</nav>
+      <div className="side-bottom"><div className="system-status"><i /> System online</div><button className="ghost" onClick={onLogout}>Log out</button></div>
     </aside>
 
     <main className="main">
       <header className="topbar">
-        <div><p className="eyebrow">{date}</p><h2>{greeting}. <span>Let's execute.</span></h2></div>
+        <div><p className="eyebrow">{date}</p><h2>{greeting}. <span>{view === "Overview" ? "Let's execute." : view}</span></h2></div>
         <button className="icon-btn" onClick={load} title="Refresh">↻</button>
       </header>
-
       {error && <div className="error banner">{error}</div>}
 
-      <section className="hero-grid">
-        <div className={`timer-card ${data.current ? "running" : ""}`}>
-          <div className="card-top"><span className="eyebrow">FOCUS TIMER</span><span className="live-dot">{data.current ? "RUNNING" : "READY"}</span></div>
-          <div className="timer-value">{formatSeconds(data.current ? actualRunning : 0)}</div>
-          {data.current ? <><div className="timer-title">{data.current.title}</div><button className="danger full" onClick={stopTimer}>Stop session</button></>
-            : <div className="timer-start"><input placeholder="What are you working on?" value={timerTitle} onChange={e => setTimerTitle(e.target.value)} onKeyDown={e => e.key === "Enter" && startTimer()} /><button className="primary" onClick={startTimer}>Start</button></div>}
-        </div>
-        <div className="stat-card"><span className="eyebrow">FOCUSED TODAY</span><strong>{formatSeconds(totals.actual_seconds)}</strong><p>Actual tracked time</p></div>
-        <div className="stat-card"><span className="eyebrow">PLANNED</span><strong>{formatSeconds(totals.planned_seconds)}</strong><p>{totals.planned_items || 0} scheduled blocks</p></div>
-        <div className="stat-card"><span className="eyebrow">EXECUTION</span><strong>{totals.schedule_completion_rate || 0}%</strong><p>{totals.completed_items || 0} of {totals.planned_items || 0} completed</p></div>
-      </section>
-
-      <section className="content-grid">
-        <div className="panel schedule-panel">
-          <div className="panel-head"><div><span className="eyebrow">TODAY</span><h3>Execution schedule</h3></div><span className="count">{data.schedule.length}</span></div>
-          {data.schedule.length === 0 ? <Empty text="Nothing scheduled yet." /> : <div className="schedule-list">
-            {data.schedule.map(item => <div className={`schedule-row ${item.status}`} key={item.id}>
-              <div className="time">{formatClock(item.start_at)}<small>{formatClock(item.end_at)}</small></div>
-              <div className="schedule-info"><strong>{item.title}</strong><span>{item.notes || "Focus block"}</span></div>
-              <div className="row-actions">{item.status === "planned" && <><button onClick={() => markSchedule(item, "completed")}>Done</button><button onClick={() => markSchedule(item, "skipped")}>Skip</button></>}</div>
-            </div>)}
-          </div>}
-        </div>
-
-        <div className="panel">
-          <div className="panel-head"><div><span className="eyebrow">OCTOBER</span><h3>Targets</h3></div></div>
-          {targets.length === 0 ? <Empty text="No monthly targets." /> : targets.map(t => <div className="target" key={t.id}>
-            <div className="target-line"><strong>{t.title}</strong><span>{t.current_value}/{t.target_value ?? "—"}</span></div>
-            <div className="progress"><i style={{ width: `${Math.min(100, t.progress_percent || 0)}%` }} /></div>
-            <small>{t.progress_percent ?? 0}% complete</small>
-          </div>)}
-        </div>
-      </section>
-
-      <section className="panel metrics">
-        <div className="panel-head"><div><span className="eyebrow">TODAY</span><h3>Operating pulse</h3></div></div>
-        <div className="metric-grid">
-          <Metric label="Activities" value={totals.activity_count || 0} />
-          <Metric label="Sessions" value={totals.session_count || 0} />
-          <Metric label="Diary" value={totals.diary_days || 0} />
-          <Metric label="Skipped" value={totals.skipped_items || 0} />
-        </div>
-      </section>
+      {view === "Overview" && <Overview data={data} targets={targets} actualRunning={actualRunning} timerTitle={timerTitle} setTimerTitle={setTimerTitle} startTimer={startTimer} stopTimer={stopTimer} markSchedule={markSchedule} totals={totals} />}
+      {view === "Schedule" && <ScheduleView date={date} schedule={data.schedule} onCreate={createSchedule} onUpdate={markSchedule} />}
+      {view === "Habits" && <HabitsView habits={data.habits} onCreate={createHabit} />}
+      {view === "Targets" && <TargetsView targets={targets} onCreate={createTarget} />}
+      {view === "History" && <HistoryView history={data.history} />}
+      {view === "Diary" && <DiaryView date={date} existing={data.diary[0]} onSave={createDiary} />}
     </main>
   </div>;
 }
 
+function Overview({ data, targets, actualRunning, timerTitle, setTimerTitle, startTimer, stopTimer, markSchedule, totals }) {
+  return <>
+    <section className="hero-grid">
+      <div className={`timer-card ${data.current ? "running" : ""}`}>
+        <div className="card-top"><span className="eyebrow">FOCUS TIMER</span><span className="live-dot">{data.current ? "RUNNING" : "READY"}</span></div>
+        <div className="timer-value">{formatSeconds(data.current ? actualRunning : 0)}</div>
+        {data.current ? <><div className="timer-title">{data.current.title}</div><button className="danger full" onClick={stopTimer}>Stop session</button></>
+          : <div className="timer-start"><input placeholder="What are you working on?" value={timerTitle} onChange={e => setTimerTitle(e.target.value)} onKeyDown={e => e.key === "Enter" && startTimer()} /><button className="primary" onClick={startTimer}>Start</button></div>}
+      </div>
+      <div className="stat-card"><span className="eyebrow">FOCUSED TODAY</span><strong>{formatSeconds(totals.actual_seconds)}</strong><p>Actual tracked time</p></div>
+      <div className="stat-card"><span className="eyebrow">PLANNED</span><strong>{formatSeconds(totals.planned_seconds)}</strong><p>{totals.planned_items || 0} scheduled blocks</p></div>
+      <div className="stat-card"><span className="eyebrow">EXECUTION</span><strong>{totals.schedule_completion_rate || 0}%</strong><p>{totals.completed_items || 0} of {totals.planned_items || 0} completed</p></div>
+    </section>
+    <section className="content-grid">
+      <div className="panel schedule-panel"><div className="panel-head"><div><span className="eyebrow">TODAY</span><h3>Execution schedule</h3></div><span className="count">{data.schedule.length}</span></div>
+        {data.schedule.length === 0 ? <Empty text="Nothing scheduled yet. Use Schedule to plan your day." /> : <div className="schedule-list">{data.schedule.map(item => <div className={`schedule-row ${item.status}`} key={item.id}>
+          <div className="time">{formatClock(item.start_at)}<small>{formatClock(item.end_at)}</small></div>
+          <div className="schedule-info"><strong>{item.title}</strong><span>{item.notes || "Focus block"}</span></div>
+          <div className="row-actions">{item.status === "planned" && <><button onClick={() => markSchedule(item, "completed")}>Done</button><button onClick={() => markSchedule(item, "skipped")}>Skip</button></>}</div>
+        </div>)}</div>}
+      </div>
+      <div className="panel"><div className="panel-head"><div><span className="eyebrow">OCTOBER</span><h3>Targets</h3></div></div>
+        {targets.length === 0 ? <Empty text="No monthly targets yet." /> : targets.slice(0, 4).map(t => <TargetCard key={t.id} t={t} />)}
+      </div>
+    </section>
+    <section className="panel metrics"><div className="panel-head"><div><span className="eyebrow">TODAY</span><h3>Operating pulse</h3></div></div>
+      <div className="metric-grid"><Metric label="Activities" value={totals.activity_count || 0} /><Metric label="Sessions" value={totals.session_count || 0} /><Metric label="Diary" value={totals.diary_days || 0} /><Metric label="Skipped" value={totals.skipped_items || 0} /></div>
+    </section>
+  </>;
+}
+
+function TargetCard({ t }) {
+  const p = t.progress_percent || 0;
+  return <div className="target"><div className="target-line"><strong>{t.title}</strong><span>{t.current_value}/{t.target_value ?? "—"}</span></div><div className="progress"><i style={{ width: `${Math.min(100, p)}%` }} /></div><small>{p.toFixed(0)}% complete</small></div>;
+}
+
+function ScheduleView({ date, schedule, onCreate, onUpdate }) {
+  const [form, setForm] = useState({ title: "", notes: "", scheduled_date: date, start_at: `${date}T18:00`, end_at: `${date}T19:00`, priority: 3 });
+  const submit = async e => { e.preventDefault(); await onCreate(form); setForm({ ...form, title: "", notes: "" }); };
+  return <section className="two-col"><div className="panel"><PanelTitle eyebrow="PLAN" title="Add schedule block" /><form className="form-grid" onSubmit={submit}>
+    <label>Title<input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} required /></label>
+    <label>Notes<textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></label>
+    <label>Date<input type="date" value={form.scheduled_date} onChange={e => { const d=e.target.value; setForm({ ...form, scheduled_date:d, start_at:`${d}T18:00`, end_at:`${d}T19:00` }); }} required /></label>
+    <div className="inline-fields"><label>Start<input type="datetime-local" value={form.start_at} onChange={e => setForm({ ...form, start_at:e.target.value })} required /></label><label>End<input type="datetime-local" value={form.end_at} onChange={e => setForm({ ...form, end_at:e.target.value })} required /></label></div>
+    <label>Priority<select value={form.priority} onChange={e => setForm({ ...form, priority:e.target.value })}><option value="1">1 — Critical</option><option value="2">2 — High</option><option value="3">3 — Normal</option><option value="4">4 — Low</option><option value="5">5 — Lowest</option></select></label>
+    <button className="primary">Add to schedule</button>
+  </form></div><div className="panel"><PanelTitle eyebrow={date} title="Today's plan" /><div className="schedule-list">{schedule.length ? schedule.map(item => <div className={`schedule-row ${item.status}`} key={item.id}><div className="time">{formatClock(item.start_at)}<small>{formatClock(item.end_at)}</small></div><div className="schedule-info"><strong>{item.title}</strong><span>{item.notes || "Focus block"}</span></div><div className="row-actions">{item.status === "planned" && <><button onClick={() => onUpdate(item,"completed")}>Done</button><button onClick={() => onUpdate(item,"skipped")}>Skip</button></>}</div></div>) : <Empty text="No blocks planned." />}</div></div></section>;
+}
+
+function HabitsView({ habits, onCreate }) {
+  const [form, setForm] = useState({ name:"", description:"", category:"study", frequency:"daily" });
+  const submit = async e => { e.preventDefault(); await onCreate(form); setForm({ name:"", description:"", category:"study", frequency:"daily" }); };
+  return <section className="two-col"><div className="panel"><PanelTitle eyebrow="ROUTINE" title="Create habit" /><form className="form-grid" onSubmit={submit}><label>Name<input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} required /></label><label>Description<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label><label>Category<input value={form.category} onChange={e=>setForm({...form,category:e.target.value})}/></label><label>Frequency<select value={form.frequency} onChange={e=>setForm({...form,frequency:e.target.value})}><option>daily</option><option>weekly</option><option>custom</option></select></label><button className="primary">Create habit</button></form></div><div className="panel"><PanelTitle eyebrow="ACTIVE" title="Your habits" />{habits.length ? <div className="item-list">{habits.map(h=><div className="list-item" key={h.id}><div><strong>{h.name}</strong><span>{h.category} · {h.frequency}</span></div><b>{h.active ? "ACTIVE" : "OFF"}</b></div>)}</div> : <Empty text="No habits yet." />}</div></section>;
+}
+
+function TargetsView({ targets, onCreate }) {
+  const [form, setForm] = useState({ title:"", description:"", target_value:"" });
+  const submit = async e => { e.preventDefault(); await onCreate(form); setForm({ title:"", description:"", target_value:"" }); };
+  return <section className="two-col"><div className="panel"><PanelTitle eyebrow="MONTHLY COMMITMENT" title="Add October target" /><form className="form-grid" onSubmit={submit}><label>Target<input value={form.title} onChange={e=>setForm({...form,title:e.target.value})} placeholder="e.g. Solve 150 DSA problems" required /></label><label>Description<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label><label>Target value<input type="number" min="0" value={form.target_value} onChange={e=>setForm({...form,target_value:e.target.value})} required /></label><button className="primary">Create target</button></form></div><div className="panel"><PanelTitle eyebrow="OCTOBER" title="Targets" />{targets.length ? targets.map(t=><TargetCard key={t.id} t={t}/>) : <Empty text="No monthly targets yet." />}</div></section>;
+}
+
+function HistoryView({ history }) {
+  return <section className="panel"><PanelTitle eyebrow="EXECUTION LOG" title="Completed sessions" />{history.length ? <div className="history-list">{history.map(s=><div className="history-row" key={s.id}><div><strong>{s.title}</strong><span>{new Date(s.started_at).toLocaleDateString()} · {new Date(s.started_at).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</span></div><b>{formatSeconds(s.duration_seconds)}</b></div>)}</div> : <Empty text="No completed sessions yet. Start your first focus session." />}</section>;
+}
+
+function DiaryView({ date, existing, onSave }) {
+  const [form, setForm] = useState({
+    accomplishments: existing?.accomplishments || "", what_went_badly: existing?.what_went_badly || "", learned: existing?.learned || "",
+    feelings: existing?.feelings || "", distractions: existing?.distractions || "", tomorrow_changes: existing?.tomorrow_changes || "", free_writing: existing?.free_writing || ""
+  });
+  useEffect(()=>setForm({ accomplishments: existing?.accomplishments || "", what_went_badly: existing?.what_went_badly || "", learned: existing?.learned || "", feelings: existing?.feelings || "", distractions: existing?.distractions || "", tomorrow_changes: existing?.tomorrow_changes || "", free_writing: existing?.free_writing || "" }),[existing?.id]);
+  const field=(key,label,placeholder)=><label>{label}<textarea value={form[key]} placeholder={placeholder} onChange={e=>setForm({...form,[key]:e.target.value})}/></label>;
+  return <section className="panel diary-panel"><PanelTitle eyebrow={date} title={existing ? "Daily reflection" : "Write today's reflection"} /><p className="muted small">5–10 minutes. Record evidence, not a performance report.</p><form className="form-grid diary-grid" onSubmit={async e=>{e.preventDefault();await onSave(form,existing);}}>{field("accomplishments","What did you accomplish?","What moved forward today?")}{field("what_went_badly","What went badly?","Where did time or focus leak?")}{field("learned","What did you learn?","Concepts, mistakes, insights.")}{field("feelings","How did you feel?","Focused, tired, confident, frustrated…")}{field("distractions","Distractions","What pulled you away?")}{field("tomorrow_changes","What changes tomorrow?","One concrete adjustment.")}{field("free_writing","Free writing","Anything else worth remembering.")}<button className="primary">{existing ? "Update reflection" : "Save reflection"}</button></form></section>;
+}
+
+function PanelTitle({ eyebrow, title }) { return <div className="panel-head"><div><span className="eyebrow">{eyebrow}</span><h3>{title}</h3></div></div>; }
 function Metric({ label, value }) { return <div className="metric"><span>{label}</span><strong>{value}</strong></div>; }
 function Empty({ text }) { return <div className="empty">{text}</div>; }
 
