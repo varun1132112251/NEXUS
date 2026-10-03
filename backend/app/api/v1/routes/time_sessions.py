@@ -39,8 +39,6 @@ def validate_links(db: Session, payload: TimeSessionStart, user_id: UUID):
         owned(db, Project, payload.project_id, user_id)
     if payload.target_id is not None:
         owned(db, Target, payload.target_id, user_id)
-    if payload.target_id is not None:
-        owned(db, Target, payload.target_id, user_id)
     return schedule
 
 
