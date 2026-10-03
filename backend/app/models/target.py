@@ -19,6 +19,7 @@ class Target(Base):
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     month: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    metric_type: Mapped[str] = mapped_column(String(64), nullable=False, default="count", server_default="count")
     target_value: Mapped[int | None] = mapped_column(Integer, nullable=True)
     current_value: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active", server_default="active")
