@@ -19,6 +19,7 @@ class ScheduleItem(Base):
     task_id: Mapped[UUID | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True, index=True)
     habit_id: Mapped[UUID | None] = mapped_column(ForeignKey("habits.id", ondelete="SET NULL"), nullable=True, index=True)
     project_id: Mapped[UUID | None] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True)
+    target_id: Mapped[UUID | None] = mapped_column(ForeignKey("targets.id", ondelete="SET NULL"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     scheduled_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
