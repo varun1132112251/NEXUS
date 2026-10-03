@@ -11,6 +11,7 @@ from app.models.habit import Habit
 from app.models.project import Project
 from app.models.schedule import ScheduleItem
 from app.models.task import Task
+from app.models.target import Target
 from app.models.time_session import TimeSession
 from app.models.user import User
 from app.schemas.time_session import TimeSessionRead, TimeSessionStart
@@ -35,6 +36,8 @@ def validate_links(db: Session, payload: TimeSessionStart, user_id: UUID):
         owned(db, Habit, payload.habit_id, user_id)
     if payload.project_id is not None:
         owned(db, Project, payload.project_id, user_id)
+    if payload.target_id is not None:
+        owned(db, Target, payload.target_id, user_id)
     return schedule
 
 
@@ -63,6 +66,8 @@ def start(
             payload.habit_id = schedule.habit_id
         if payload.project_id is None:
             payload.project_id = schedule.project_id
+        if payload.target_id is None:
+            payload.target_id = schedule.target_id
 
     session = TimeSession(
         user_id=user.id,
