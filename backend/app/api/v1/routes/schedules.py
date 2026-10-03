@@ -11,6 +11,7 @@ from app.models.habit import Habit
 from app.models.project import Project
 from app.models.schedule import ScheduleItem
 from app.models.task import Task
+from app.models.target import Target
 from app.models.user import User
 from app.schemas.schedule import ScheduleItemCreate, ScheduleItemRead, ScheduleItemUpdate
 
@@ -31,6 +32,8 @@ def validate_links(db: Session, payload, user_id: UUID):
         owned(db, Habit, payload.habit_id, user_id)
     if payload.project_id is not None:
         owned(db, Project, payload.project_id, user_id)
+    if payload.target_id is not None:
+        owned(db, Target, payload.target_id, user_id)
 
 
 @router.post("", response_model=ScheduleItemRead, status_code=status.HTTP_201_CREATED)
