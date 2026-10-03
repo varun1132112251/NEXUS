@@ -11,6 +11,7 @@ class TimeSessionStart(BaseModel):
     task_id: UUID | None = None
     habit_id: UUID | None = None
     project_id: UUID | None = None
+    target_id: UUID | None = None
 
 
 class TimeSessionRead(BaseModel):
@@ -21,6 +22,7 @@ class TimeSessionRead(BaseModel):
     task_id: UUID | None
     habit_id: UUID | None
     project_id: UUID | None
+    target_id: UUID | None
     title: str
     notes: str | None
     started_at: datetime
