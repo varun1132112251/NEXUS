@@ -39,6 +39,29 @@ const isoFromLocal = (value) => {
   return `${value}:00${sign}${hh}:${mm}`;
 };
 
+
+const METRIC_OPTIONS = [
+  ["problems_solved", "DSA problems solved"],
+  ["pages_read", "Reading pages"],
+  ["sessions_completed", "Practice sessions"],
+  ["questions_solved", "Questions solved"],
+  ["topics_revised", "Topics revised"],
+  ["milestones_completed", "Project milestones"],
+  ["books_completed", "Books completed"],
+  ["count", "Generic count"],
+];
+const METRIC_LABELS = Object.fromEntries(METRIC_OPTIONS);
+const metricKey = (type) => ({
+  problems_solved: "problems_solved",
+  pages_read: "pages_read",
+  sessions_completed: "sessions_completed",
+  questions_solved: "questions_solved",
+  topics_revised: "topics_revised",
+  milestones_completed: "milestones_completed",
+  books_completed: "books_completed",
+  count: "count",
+}[type] || "count");
+
 function Login({ onLogin }) {
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
@@ -87,7 +110,7 @@ function Dashboard({ token, onLogout }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [timerTitle, setTimerTitle] = useState("");
-  const [contributionValue, setContributionValue] = useState("1");
+  const [activityForm, setActivityForm] = useState({ metric_value: "", topic: "", book: "", chapter: "", practice_type: "", workstream: "", milestone: "", accuracy: "", attempted: "", mistakes: "", words_learned: "", key_concepts: "", subject: "", difficulty: "" });
   const [now, setNow] = useState(Date.now());
   const [scheduleDate, setScheduleDate] = useState(localDate());
 
@@ -149,34 +172,55 @@ function Dashboard({ token, onLogout }) {
 
   async function stopTimer() {
     if (!data.current) return;
-    if (data.current.target_id && (contributionValue === "" || Number(contributionValue) < 0 || Number.isNaN(Number(contributionValue)))) {
-      setError("Enter a valid target contribution before stopping this session.");
+    const target = data.targets.find(t => t.id === data.current.target_id);
+    if (target && (activityForm.metric_value === "" || Number(activityForm.metric_value) < 0 || Number.isNaN(Number(activityForm.metric_value)))) {
+      setError("Enter the measured value for " + METRIC_LABELS[target.metric_type] + ".");
       return;
     }
     try {
-      const session = await api(`/time-sessions/${data.current.id}/stop`, { method: "POST" }, token);
-      await api("/activity-records", {
-        method: "POST",
-        body: JSON.stringify({
-          activity_type: "execution",
-          title: session.title,
-          details: {
-            duration_seconds: session.duration_seconds,
-            schedule_item_id: session.schedule_item_id,
-            task_id: session.task_id,
-            habit_id: session.habit_id,
-            project_id: session.project_id
-          },
-          notes: "Execution session recorded by NEXUS.",
-          time_session_id: session.id,
+      const session = await api("/time-sessions/" + data.current.id + "/stop", { method: "POST" }, token);
+      if (target) {
+        const value = Math.max(0, Number(activityForm.metric_value) || 0);
+        const details = {
+          duration_seconds: session.duration_seconds,
+          schedule_item_id: session.schedule_item_id,
           task_id: session.task_id,
           habit_id: session.habit_id,
           project_id: session.project_id,
-          target_id: session.target_id,
-          contribution_value: session.target_id ? Math.max(0, Number(contributionValue) || 0) : null
-        })
-      }, token);
-      setContributionValue("1");
+          ...Object.fromEntries(Object.entries(activityForm).filter(([key, val]) => key !== "metric_value" && val !== ""))
+        };
+        details[metricKey(target.metric_type)] = value;
+        await api("/activity-records", {
+          method: "POST",
+          body: JSON.stringify({
+            activity_type: target.metric_type,
+            title: session.title,
+            details,
+            notes: "Execution activity recorded by NEXUS.",
+            time_session_id: session.id,
+            task_id: session.task_id,
+            habit_id: session.habit_id,
+            project_id: session.project_id,
+            target_id: session.target_id,
+            metric_value: value
+          })
+        }, token);
+      } else {
+        await api("/activity-records", {
+          method: "POST",
+          body: JSON.stringify({
+            activity_type: "execution",
+            title: session.title,
+            details: { duration_seconds: session.duration_seconds },
+            notes: "Execution session recorded by NEXUS.",
+            time_session_id: session.id,
+            task_id: session.task_id,
+            habit_id: session.habit_id,
+            project_id: session.project_id
+          })
+        }, token);
+      }
+      setActivityForm({ metric_value: "", topic: "", book: "", chapter: "", practice_type: "", workstream: "", milestone: "", accuracy: "", attempted: "", mistakes: "", words_learned: "", key_concepts: "", subject: "", difficulty: "" });
       await load();
     } catch (err) { setError(err.message); }
   }
@@ -197,7 +241,7 @@ function Dashboard({ token, onLogout }) {
 
   async function createTarget(form) {
     await api("/targets", { method: "POST", body: JSON.stringify({
-      title: form.title, description: form.description || null, month, target_value: Number(form.target_value)
+      title: form.title, description: form.description || null, month, metric_type: form.metric_type, target_value: Number(form.target_value)
     }) }, token);
     await load();
   }
@@ -263,7 +307,7 @@ function Dashboard({ token, onLogout }) {
       </header>
       {error && <div className="error banner">{error}</div>}
 
-      {view === "Overview" && <Overview data={data} targets={targets} actualRunning={actualRunning} timerTitle={timerTitle} setTimerTitle={setTimerTitle} startTimer={startTimer} stopTimer={stopTimer} contributionValue={contributionValue} setContributionValue={setContributionValue} markSchedule={markSchedule} totals={totals} />}
+      {view === "Overview" && <Overview data={data} targets={targets} actualRunning={actualRunning} timerTitle={timerTitle} setTimerTitle={setTimerTitle} startTimer={startTimer} stopTimer={stopTimer} activityForm={activityForm} setActivityForm={setActivityForm} markSchedule={markSchedule} onTargetChange={updateScheduleTarget} totals={totals} />}
       {view === "Schedule" && <ScheduleView date={scheduleDate} schedule={data.schedule} targets={data.targets} onDateChange={async (next) => { setScheduleDate(next); await loadScheduleFor(next); }} onCreate={createSchedule} onUpdate={markSchedule} onTargetChange={updateScheduleTarget} onStart={startSchedule} />}
       {view === "Habits" && <HabitsView habits={data.habits} onCreate={createHabit} />}
       {view === "Targets" && <TargetsView targets={targets} onCreate={createTarget} />}
@@ -273,13 +317,13 @@ function Dashboard({ token, onLogout }) {
   </div>;
 }
 
-function Overview({ data, targets, actualRunning, timerTitle, setTimerTitle, startTimer, stopTimer, contributionValue, setContributionValue, markSchedule, totals }) {
+function Overview({ data, targets, actualRunning, timerTitle, setTimerTitle, startTimer, stopTimer, activityForm, setActivityForm, markSchedule, onTargetChange, totals }) {
   return <>
     <section className="hero-grid">
       <div className={`timer-card ${data.current ? "running" : ""}`}>
         <div className="card-top"><span className="eyebrow">FOCUS TIMER</span><span className="live-dot">{data.current ? "RUNNING" : "READY"}</span></div>
         <div className="timer-value">{formatSeconds(data.current ? actualRunning : 0)}</div>
-        {data.current ? <><div className="timer-title">{data.current.title}</div>{data.current.target_id && <label className="small-input">Target contribution<input type="number" min="0" value={contributionValue} onChange={e => setContributionValue(e.target.value)} /></label>}<button className="danger full" onClick={stopTimer}>Stop session</button></>
+        {data.current ? <><div className="timer-title">{data.current.title}</div>{data.current.target_id && <MetricCapture target={targets.find(t => t.id === data.current.target_id)} form={activityForm} setForm={setActivityForm} />}<button className="danger full" onClick={stopTimer}>Stop session</button></>
           : <div className="timer-start"><input placeholder="What are you working on?" value={timerTitle} onChange={e => setTimerTitle(e.target.value)} onKeyDown={e => e.key === "Enter" && startTimer()} /><button className="primary" onClick={startTimer}>Start</button></div>}
       </div>
       <div className="stat-card"><span className="eyebrow">FOCUSED TODAY</span><strong>{formatSeconds(totals.actual_seconds)}</strong><p>Actual tracked time</p></div>
@@ -304,9 +348,64 @@ function Overview({ data, targets, actualRunning, timerTitle, setTimerTitle, sta
   </>;
 }
 
+
+function MetricCapture({ target, form, setForm }) {
+  if (!target) return null;
+  const update = (key, value) => setForm(prev => ({ ...prev, [key]: value }));
+  const valueLabels = {
+    problems_solved: "Problems solved",
+    pages_read: "Pages read",
+    sessions_completed: "Sessions completed",
+    questions_solved: "Questions solved",
+    topics_revised: "Topics revised",
+    milestones_completed: "Milestones completed",
+    books_completed: "Books completed",
+    count: "Completed count",
+  };
+  return <div className="activity-capture">
+    <div className="capture-title">Record {METRIC_LABELS[target.metric_type]}</div>
+    <label>{valueLabels[target.metric_type] || "Measured value"}<input type="number" min="0" value={form.metric_value} onChange={e => update("metric_value", e.target.value)} required /></label>
+    {target.metric_type === "problems_solved" && <div className="capture-grid">
+      <label>Topic<input value={form.topic} onChange={e=>update("topic",e.target.value)} /></label>
+      <label>Attempted<input type="number" min="0" value={form.attempted} onChange={e=>update("attempted",e.target.value)} /></label>
+      <label>Mistakes<input type="number" min="0" value={form.mistakes} onChange={e=>update("mistakes",e.target.value)} /></label>
+      <label>Difficulty<input value={form.difficulty} onChange={e=>update("difficulty",e.target.value)} placeholder="Easy / Medium / Hard" /></label>
+    </div>}
+    {target.metric_type === "pages_read" && <div className="capture-grid">
+      <label>Book<input value={form.book} onChange={e=>update("book",e.target.value)} /></label>
+      <label>Chapter<input value={form.chapter} onChange={e=>update("chapter",e.target.value)} /></label>
+      <label>Key concepts<textarea value={form.key_concepts} onChange={e=>update("key_concepts",e.target.value)} /></label>
+    </div>}
+    {target.metric_type === "sessions_completed" && <div className="capture-grid">
+      <label>Practice type<input value={form.practice_type} onChange={e=>update("practice_type",e.target.value)} placeholder="Speaking / writing / pronunciation" /></label>
+      <label>Topic<input value={form.topic} onChange={e=>update("topic",e.target.value)} /></label>
+      <label>Words learned<input type="number" min="0" value={form.words_learned} onChange={e=>update("words_learned",e.target.value)} /></label>
+    </div>}
+    {target.metric_type === "questions_solved" && <div className="capture-grid">
+      <label>Subject<input value={form.subject} onChange={e=>update("subject",e.target.value)} /></label>
+      <label>Topic<input value={form.topic} onChange={e=>update("topic",e.target.value)} /></label>
+      <label>Accuracy %<input type="number" min="0" max="100" value={form.accuracy} onChange={e=>update("accuracy",e.target.value)} /></label>
+    </div>}
+    {target.metric_type === "topics_revised" && <div className="capture-grid">
+      <label>Subject<input value={form.subject} onChange={e=>update("subject",e.target.value)} /></label>
+      <label>Revision topic<input value={form.topic} onChange={e=>update("topic",e.target.value)} /></label>
+      <label>Questions solved<input type="number" min="0" value={form.attempted} onChange={e=>update("attempted",e.target.value)} /></label>
+      <label>Accuracy %<input type="number" min="0" max="100" value={form.accuracy} onChange={e=>update("accuracy",e.target.value)} /></label>
+    </div>}
+    {target.metric_type === "milestones_completed" && <div className="capture-grid">
+      <label>Workstream<input value={form.workstream} onChange={e=>update("workstream",e.target.value)} /></label>
+      <label>Milestone<input value={form.milestone} onChange={e=>update("milestone",e.target.value)} /></label>
+    </div>}
+    {target.metric_type === "books_completed" && <div className="capture-grid">
+      <label>Book<input value={form.book} onChange={e=>update("book",e.target.value)} /></label>
+      <label>Key concepts<textarea value={form.key_concepts} onChange={e=>update("key_concepts",e.target.value)} /></label>
+    </div>}
+  </div>;
+}
+
 function TargetCard({ t }) {
   const p = t.progress_percent || 0;
-  return <div className="target"><div className="target-line"><strong>{t.title}</strong><span>{t.current_value}/{t.target_value ?? "—"}</span></div><div className="progress"><i style={{ width: `${Math.min(100, p)}%` }} /></div><small>{p.toFixed(0)}% complete</small></div>;
+  return <div className="target"><div className="target-line"><strong>{t.title}</strong><span>{t.current_value}/{t.target_value ?? "—"}</span></div><div className="progress"><i style={{ width: `${Math.min(100, p)}%` }} /></div><small>{METRIC_LABELS[t.metric_type] || t.metric_type} · {p.toFixed(0)}% complete</small></div>;
 }
 
 function ScheduleView({ date, schedule, targets, onDateChange, onCreate, onUpdate, onTargetChange, onStart }) {
@@ -338,9 +437,9 @@ function HabitsView({ habits, onCreate }) {
 }
 
 function TargetsView({ targets, onCreate }) {
-  const [form, setForm] = useState({ title:"", description:"", target_value:"" });
-  const submit = async e => { e.preventDefault(); await onCreate(form); setForm({ title:"", description:"", target_value:"" }); };
-  return <section className="two-col"><div className="panel"><PanelTitle eyebrow="MONTHLY COMMITMENT" title="Add October target" /><form className="form-grid" onSubmit={submit}><label>Target<input value={form.title} onChange={e=>setForm({...form,title:e.target.value})} placeholder="e.g. Solve 150 DSA problems" required /></label><label>Description<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label><label>Target value<input type="number" min="0" value={form.target_value} onChange={e=>setForm({...form,target_value:e.target.value})} required /></label><button className="primary">Create target</button></form></div><div className="panel"><PanelTitle eyebrow="OCTOBER" title="Targets" />{targets.length ? targets.map(t=><TargetCard key={t.id} t={t}/>) : <Empty text="No monthly targets yet." />}</div></section>;
+  const [form, setForm] = useState({ title:"", description:"", metric_type:"count", target_value:"" });
+  const submit = async e => { e.preventDefault(); await onCreate(form); setForm({ title:"", description:"", metric_type:"count", target_value:"" }); };
+  return <section className="two-col"><div className="panel"><PanelTitle eyebrow="MONTHLY COMMITMENT" title="Add October target" /><form className="form-grid" onSubmit={submit}><label>Target<input value={form.title} onChange={e=>setForm({...form,title:e.target.value})} placeholder="e.g. Solve 150 DSA problems" required /></label><label>Description<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label><label>Progress metric<select value={form.metric_type} onChange={e=>setForm({...form,metric_type:e.target.value})}>{METRIC_OPTIONS.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label><label>Target value<input type="number" min="0" value={form.target_value} onChange={e=>setForm({...form,target_value:e.target.value})} required /></label><button className="primary">Create target</button></form></div><div className="panel"><PanelTitle eyebrow="OCTOBER" title="Targets" />{targets.length ? targets.map(t=><TargetCard key={t.id} t={t}/>) : <Empty text="No monthly targets yet." />}</div></section>;
 }
 
 function HistoryView({ history }) {
