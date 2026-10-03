@@ -149,6 +149,10 @@ function Dashboard({ token, onLogout }) {
 
   async function stopTimer() {
     if (!data.current) return;
+    if (data.current.target_id && (contributionValue === "" || Number(contributionValue) < 0 || Number.isNaN(Number(contributionValue)))) {
+      setError("Enter a valid target contribution before stopping this session.");
+      return;
+    }
     try {
       const session = await api(`/time-sessions/${data.current.id}/stop`, { method: "POST" }, token);
       await api("/activity-records", {
@@ -172,6 +176,7 @@ function Dashboard({ token, onLogout }) {
           contribution_value: session.target_id ? Math.max(0, Number(contributionValue) || 0) : null
         })
       }, token);
+      setContributionValue("1");
       await load();
     } catch (err) { setError(err.message); }
   }
