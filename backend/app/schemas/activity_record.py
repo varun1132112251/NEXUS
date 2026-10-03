@@ -15,7 +15,7 @@ class ActivityRecordCreate(BaseModel):
     habit_id: UUID | None = None
     project_id: UUID | None = None
     target_id: UUID | None = None
-    contribution_value: int | None = Field(default=None, ge=0)
+    metric_value: int | None = Field(default=None, ge=0)
 
 
 class ActivityRecordRead(BaseModel):
@@ -27,7 +27,7 @@ class ActivityRecordRead(BaseModel):
     habit_id: UUID | None
     project_id: UUID | None
     target_id: UUID | None
-    contribution_value: int | None
+    metric_value: int | None
     activity_type: str
     title: str
     details: dict
