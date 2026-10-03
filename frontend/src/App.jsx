@@ -127,10 +127,49 @@ function Dashboard({ token, onLogout }) {
     } catch (err) { setError(err.message); }
   }
 
+  async function startSchedule(item) {
+    try {
+      await api("/time-sessions/start", {
+        method: "POST",
+        body: JSON.stringify({
+          title: item.title,
+          notes: item.notes || null,
+          schedule_item_id: item.id,
+          task_id: item.task_id,
+          habit_id: item.habit_id,
+          project_id: item.project_id
+        })
+      }, token);
+      setView("Overview");
+      await load();
+    } catch (err) { setError(err.message); }
+  }
+
   async function stopTimer() {
     if (!data.current) return;
-    try { await api(`/time-sessions/${data.current.id}/stop`, { method: "POST" }, token); await load(); }
-    catch (err) { setError(err.message); }
+    try {
+      const session = await api(`/time-sessions/${data.current.id}/stop`, { method: "POST" }, token);
+      await api("/activity-records", {
+        method: "POST",
+        body: JSON.stringify({
+          activity_type: "execution",
+          title: session.title,
+          details: {
+            duration_seconds: session.duration_seconds,
+            schedule_item_id: session.schedule_item_id,
+            task_id: session.task_id,
+            habit_id: session.habit_id,
+            project_id: session.project_id
+          },
+          notes: "Execution session recorded by NEXUS.",
+          time_session_id: session.id,
+          task_id: session.task_id,
+          habit_id: session.habit_id,
+          project_id: session.project_id
+        })
+      }, token);
+      await load();
+    } catch (err) { setError(err.message); }
   }
 
   async function markSchedule(item, status) {
@@ -209,7 +248,7 @@ function Dashboard({ token, onLogout }) {
       {error && <div className="error banner">{error}</div>}
 
       {view === "Overview" && <Overview data={data} targets={targets} actualRunning={actualRunning} timerTitle={timerTitle} setTimerTitle={setTimerTitle} startTimer={startTimer} stopTimer={stopTimer} markSchedule={markSchedule} totals={totals} />}
-      {view === "Schedule" && <ScheduleView date={scheduleDate} schedule={data.schedule} onDateChange={async (next) => { setScheduleDate(next); await loadScheduleFor(next); }} onCreate={createSchedule} onUpdate={markSchedule} />}
+      {view === "Schedule" && <ScheduleView date={scheduleDate} schedule={data.schedule} onDateChange={async (next) => { setScheduleDate(next); await loadScheduleFor(next); }} onCreate={createSchedule} onUpdate={markSchedule} onStart={startSchedule} />}
       {view === "Habits" && <HabitsView habits={data.habits} onCreate={createHabit} />}
       {view === "Targets" && <TargetsView targets={targets} onCreate={createTarget} />}
       {view === "History" && <HistoryView history={data.history} />}
@@ -254,7 +293,7 @@ function TargetCard({ t }) {
   return <div className="target"><div className="target-line"><strong>{t.title}</strong><span>{t.current_value}/{t.target_value ?? "—"}</span></div><div className="progress"><i style={{ width: `${Math.min(100, p)}%` }} /></div><small>{p.toFixed(0)}% complete</small></div>;
 }
 
-function ScheduleView({ date, schedule, onDateChange, onCreate, onUpdate }) {
+function ScheduleView({ date, schedule, onDateChange, onCreate, onUpdate, onStart }) {
   const [form, setForm] = useState({ title: "", notes: "", scheduled_date: date, start_at: `${date}T18:00`, end_at: `${date}T19:00`, priority: 3 });
   useEffect(() => {
     setForm(prev => ({ ...prev, scheduled_date: date, start_at: `${date}T18:00`, end_at: `${date}T19:00` }));
@@ -273,7 +312,7 @@ function ScheduleView({ date, schedule, onDateChange, onCreate, onUpdate }) {
     <div className="inline-fields"><label>Start<input type="datetime-local" value={form.start_at} onChange={e => setForm({ ...form, start_at:e.target.value })} required /></label><label>End<input type="datetime-local" value={form.end_at} onChange={e => setForm({ ...form, end_at:e.target.value })} required /></label></div>
     <label>Priority<select value={form.priority} onChange={e => setForm({ ...form, priority:e.target.value })}><option value="1">1 — Critical</option><option value="2">2 — High</option><option value="3">3 — Normal</option><option value="4">4 — Low</option><option value="5">5 — Lowest</option></select></label>
     <button className="primary">Add to schedule</button>
-  </form></div><div className="panel"><div className="panel-head"><div><span className="eyebrow">{date}</span><h3>{date === localDate() ? "Today’s plan" : "Planned execution"}</h3><p className="muted small">{dateLabel}</p></div><div className="date-nav"><button className="ghost small-btn" type="button" onClick={() => shiftDate(-1)}>←</button><button className="ghost small-btn" type="button" onClick={() => shiftDate(1)}>→</button></div></div><div className="schedule-list">{schedule.length ? schedule.map(item => <div className={`schedule-row ${item.status}`} key={item.id}><div className="time">{formatClock(item.start_at)}<small>{formatClock(item.end_at)}</small></div><div className="schedule-info"><strong>{item.title}</strong><span>{item.notes || "Focus block"}</span></div><div className="row-actions">{item.status === "planned" && <><button onClick={() => onUpdate(item,"completed")}>Done</button><button onClick={() => onUpdate(item,"skipped")}>Skip</button></>}</div></div>) : <Empty text="No blocks planned." />}</div></div></section>;
+  </form></div><div className="panel"><div className="panel-head"><div><span className="eyebrow">{date}</span><h3>{date === localDate() ? "Today’s plan" : "Planned execution"}</h3><p className="muted small">{dateLabel}</p></div><div className="date-nav"><button className="ghost small-btn" type="button" onClick={() => shiftDate(-1)}>←</button><button className="ghost small-btn" type="button" onClick={() => shiftDate(1)}>→</button></div></div><div className="schedule-list">{schedule.length ? schedule.map(item => <div className={`schedule-row ${item.status}`} key={item.id}><div className="time">{formatClock(item.start_at)}<small>{formatClock(item.end_at)}</small></div><div className="schedule-info"><strong>{item.title}</strong><span>{item.notes || "Focus block"}</span></div><div className="row-actions">{item.status === "planned" && <><button onClick={() => onStart(item)}>Start</button><button onClick={() => onUpdate(item,"completed")}>Done</button><button onClick={() => onUpdate(item,"skipped")}>Skip</button></>}</div></div>) : <Empty text="No blocks planned." />}</div></div></section>;
 }
 
 function HabitsView({ habits, onCreate }) {
