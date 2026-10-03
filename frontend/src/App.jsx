@@ -87,6 +87,7 @@ function Dashboard({ token, onLogout }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [timerTitle, setTimerTitle] = useState("");
+  const [contributionValue, setContributionValue] = useState("1");
   const [now, setNow] = useState(Date.now());
   const [scheduleDate, setScheduleDate] = useState(localDate());
 
@@ -168,7 +169,7 @@ function Dashboard({ token, onLogout }) {
           habit_id: session.habit_id,
           project_id: session.project_id,
           target_id: session.target_id,
-          contribution_value: session.target_id ? Number(window.prompt("Target contribution", "1") || 0) : null
+          contribution_value: session.target_id ? Math.max(0, Number(contributionValue) || 0) : null
         })
       }, token);
       await load();
@@ -250,7 +251,7 @@ function Dashboard({ token, onLogout }) {
       </header>
       {error && <div className="error banner">{error}</div>}
 
-      {view === "Overview" && <Overview data={data} targets={targets} actualRunning={actualRunning} timerTitle={timerTitle} setTimerTitle={setTimerTitle} startTimer={startTimer} stopTimer={stopTimer} markSchedule={markSchedule} totals={totals} />}
+      {view === "Overview" && <Overview data={data} targets={targets} actualRunning={actualRunning} timerTitle={timerTitle} setTimerTitle={setTimerTitle} startTimer={startTimer} stopTimer={stopTimer} contributionValue={contributionValue} setContributionValue={setContributionValue} markSchedule={markSchedule} totals={totals} />}
       {view === "Schedule" && <ScheduleView date={scheduleDate} schedule={data.schedule} targets={data.targets} onDateChange={async (next) => { setScheduleDate(next); await loadScheduleFor(next); }} onCreate={createSchedule} onUpdate={markSchedule} onStart={startSchedule} />}
       {view === "Habits" && <HabitsView habits={data.habits} onCreate={createHabit} />}
       {view === "Targets" && <TargetsView targets={targets} onCreate={createTarget} />}
@@ -260,13 +261,13 @@ function Dashboard({ token, onLogout }) {
   </div>;
 }
 
-function Overview({ data, targets, actualRunning, timerTitle, setTimerTitle, startTimer, stopTimer, markSchedule, totals }) {
+function Overview({ data, targets, actualRunning, timerTitle, setTimerTitle, startTimer, stopTimer, contributionValue, setContributionValue, markSchedule, totals }) {
   return <>
     <section className="hero-grid">
       <div className={`timer-card ${data.current ? "running" : ""}`}>
         <div className="card-top"><span className="eyebrow">FOCUS TIMER</span><span className="live-dot">{data.current ? "RUNNING" : "READY"}</span></div>
         <div className="timer-value">{formatSeconds(data.current ? actualRunning : 0)}</div>
-        {data.current ? <><div className="timer-title">{data.current.title}</div><button className="danger full" onClick={stopTimer}>Stop session</button></>
+        {data.current ? <><div className="timer-title">{data.current.title}</div>{data.current.target_id && <label className="small-input">Target contribution<input type="number" min="0" value={contributionValue} onChange={e => setContributionValue(e.target.value)} /></label>}<button className="danger full" onClick={stopTimer}>Stop session</button></>
           : <div className="timer-start"><input placeholder="What are you working on?" value={timerTitle} onChange={e => setTimerTitle(e.target.value)} onKeyDown={e => e.key === "Enter" && startTimer()} /><button className="primary" onClick={startTimer}>Start</button></div>}
       </div>
       <div className="stat-card"><span className="eyebrow">FOCUSED TODAY</span><strong>{formatSeconds(totals.actual_seconds)}</strong><p>Actual tracked time</p></div>
