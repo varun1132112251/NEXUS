@@ -40,6 +40,16 @@ const isoFromLocal = (value) => {
 };
 
 
+const inferMetricType = (title = "") => {
+  const t = title.toLowerCase();
+  if (t.includes("dsa") || t.includes("problem")) return "problems_solved";
+  if (t.includes("book") && (t.includes("read") || t.includes("reading"))) return "books_completed";
+  if (t.includes("english") && t.includes("session")) return "sessions_completed";
+  if (t.includes("gate") && (t.includes("revision") || t.includes("question"))) return "questions_solved";
+  if (t.includes("nexus") && (t.includes("complete") || t.includes("v1"))) return "milestones_completed";
+  return "count";
+};
+
 const METRIC_OPTIONS = [
   ["problems_solved", "DSA problems solved"],
   ["pages_read", "Reading pages"],
@@ -446,7 +456,7 @@ function HabitsView({ habits, onCreate }) {
 function TargetsView({ targets, onCreate, onUpdate }) {
   const [form, setForm] = useState({ title:"", description:"", metric_type:"count", target_value:"" });
   const submit = async e => { e.preventDefault(); await onCreate(form); setForm({ title:"", description:"", metric_type:"count", target_value:"" }); };
-  return <section className="two-col"><div className="panel"><PanelTitle eyebrow="MONTHLY COMMITMENT" title="Add October target" /><form className="form-grid" onSubmit={submit}><label>Target<input value={form.title} onChange={e=>setForm({...form,title:e.target.value})} placeholder="e.g. Solve 150 DSA problems" required /></label><label>Description<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label><label>Progress metric<select value={form.metric_type} onChange={e=>setForm({...form,metric_type:e.target.value})}>{METRIC_OPTIONS.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label><label>Target value<input type="number" min="0" value={form.target_value} onChange={e=>setForm({...form,target_value:e.target.value})} required /></label><button className="primary">Create target</button></form></div><div className="panel"><PanelTitle eyebrow="OCTOBER" title="Targets" />{targets.length ? targets.map(t=><div key={t.id}><TargetCard t={t}/><label className="target-metric-editor">Progress metric<select value={t.metric_type || "count"} onChange={e=>onUpdate(t.id,{metric_type:e.target.value})}>{METRIC_OPTIONS.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label></div>) : <Empty text="No monthly targets yet." />}</div></section>;
+  return <section className="two-col"><div className="panel"><PanelTitle eyebrow="MONTHLY COMMITMENT" title="Add October target" /><form className="form-grid" onSubmit={submit}><label>Target<input value={form.title} onChange={e=>setForm({...form,title:e.target.value,metric_type:inferMetricType(e.target.value)})} placeholder="e.g. Solve 150 DSA problems" required /></label><label>Description<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label><label>Progress metric<select value={form.metric_type} onChange={e=>setForm({...form,metric_type:e.target.value})}>{METRIC_OPTIONS.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label><label>Target value<input type="number" min="0" value={form.target_value} onChange={e=>setForm({...form,target_value:e.target.value})} required /></label><button className="primary">Create target</button></form></div><div className="panel"><PanelTitle eyebrow="OCTOBER" title="Targets" />{targets.length ? targets.map(t=><div key={t.id}><TargetCard t={t}/><label className="target-metric-editor">Progress metric<select value={t.metric_type || "count"} onChange={e=>onUpdate(t.id,{metric_type:e.target.value})}>{METRIC_OPTIONS.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label></div>) : <Empty text="No monthly targets yet." />}</div></section>;
 }
 
 function HistoryView({ history }) {
