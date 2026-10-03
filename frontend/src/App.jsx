@@ -181,6 +181,13 @@ function Dashboard({ token, onLogout }) {
     } catch (err) { setError(err.message); }
   }
 
+  async function updateScheduleTarget(item, targetId) {
+    try {
+      await api(`/schedule/${item.id}`, { method: "PATCH", body: JSON.stringify({ target_id: targetId || null }) }, token);
+      await load();
+    } catch (err) { setError(err.message); }
+  }
+
   async function markSchedule(item, status) {
     try {
       await api(`/schedule/${item.id}`, { method: "PATCH", body: JSON.stringify({ status }) }, token);
@@ -257,7 +264,7 @@ function Dashboard({ token, onLogout }) {
       {error && <div className="error banner">{error}</div>}
 
       {view === "Overview" && <Overview data={data} targets={targets} actualRunning={actualRunning} timerTitle={timerTitle} setTimerTitle={setTimerTitle} startTimer={startTimer} stopTimer={stopTimer} contributionValue={contributionValue} setContributionValue={setContributionValue} markSchedule={markSchedule} totals={totals} />}
-      {view === "Schedule" && <ScheduleView date={scheduleDate} schedule={data.schedule} targets={data.targets} onDateChange={async (next) => { setScheduleDate(next); await loadScheduleFor(next); }} onCreate={createSchedule} onUpdate={markSchedule} onStart={startSchedule} />}
+      {view === "Schedule" && <ScheduleView date={scheduleDate} schedule={data.schedule} targets={data.targets} onDateChange={async (next) => { setScheduleDate(next); await loadScheduleFor(next); }} onCreate={createSchedule} onUpdate={markSchedule} onTargetChange={updateScheduleTarget} onStart={startSchedule} />}
       {view === "Habits" && <HabitsView habits={data.habits} onCreate={createHabit} />}
       {view === "Targets" && <TargetsView targets={targets} onCreate={createTarget} />}
       {view === "History" && <HistoryView history={data.history} />}
@@ -283,7 +290,7 @@ function Overview({ data, targets, actualRunning, timerTitle, setTimerTitle, sta
       <div className="panel schedule-panel"><div className="panel-head"><div><span className="eyebrow">TODAY</span><h3>Execution schedule</h3></div><span className="count">{data.schedule.length}</span></div>
         {data.schedule.length === 0 ? <Empty text="Nothing scheduled yet. Use Schedule to plan your day." /> : <div className="schedule-list">{data.schedule.map(item => <div className={`schedule-row ${item.status}`} key={item.id}>
           <div className="time">{formatClock(item.start_at)}<small>{formatClock(item.end_at)}</small></div>
-          <div className="schedule-info"><strong>{item.title}</strong><span>{item.notes || "Focus block"}</span></div>
+          <div className="schedule-info"><strong>{item.title}</strong><span>{item.notes || "Focus block"}</span><select className="schedule-target" value={item.target_id || ""} onChange={e => onTargetChange(item, e.target.value)}><option value="">No target</option>{targets.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}</select></div>
           <div className="row-actions">{item.status === "planned" && <><button onClick={() => markSchedule(item, "completed")}>Done</button><button onClick={() => markSchedule(item, "skipped")}>Skip</button></>}</div>
         </div>)}</div>}
       </div>
@@ -302,7 +309,7 @@ function TargetCard({ t }) {
   return <div className="target"><div className="target-line"><strong>{t.title}</strong><span>{t.current_value}/{t.target_value ?? "—"}</span></div><div className="progress"><i style={{ width: `${Math.min(100, p)}%` }} /></div><small>{p.toFixed(0)}% complete</small></div>;
 }
 
-function ScheduleView({ date, schedule, targets, onDateChange, onCreate, onUpdate, onStart }) {
+function ScheduleView({ date, schedule, targets, onDateChange, onCreate, onUpdate, onTargetChange, onStart }) {
   const [form, setForm] = useState({ title: "", notes: "", scheduled_date: date, start_at: `${date}T18:00`, end_at: `${date}T19:00`, priority: 3, target_id: "" });
   useEffect(() => {
     setForm(prev => ({ ...prev, scheduled_date: date, start_at: `${date}T18:00`, end_at: `${date}T19:00` }));
@@ -321,7 +328,7 @@ function ScheduleView({ date, schedule, targets, onDateChange, onCreate, onUpdat
     <div className="inline-fields"><label>Start<input type="datetime-local" value={form.start_at} onChange={e => setForm({ ...form, start_at:e.target.value })} required /></label><label>End<input type="datetime-local" value={form.end_at} onChange={e => setForm({ ...form, end_at:e.target.value })} required /></label></div>
     <label>Target<select value={form.target_id} onChange={e => setForm({ ...form, target_id:e.target.value })}><option value="">No target</option>{targets.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}</select></label><label>Priority<select value={form.priority} onChange={e => setForm({ ...form, priority:e.target.value })}><option value="1">1 — Critical</option><option value="2">2 — High</option><option value="3">3 — Normal</option><option value="4">4 — Low</option><option value="5">5 — Lowest</option></select></label>
     <button className="primary">Add to schedule</button>
-  </form></div><div className="panel"><div className="panel-head"><div><span className="eyebrow">{date}</span><h3>{date === localDate() ? "Today’s plan" : "Planned execution"}</h3><p className="muted small">{dateLabel}</p></div><div className="date-nav"><button className="ghost small-btn" type="button" onClick={() => shiftDate(-1)}>←</button><button className="ghost small-btn" type="button" onClick={() => shiftDate(1)}>→</button></div></div><div className="schedule-list">{schedule.length ? schedule.map(item => <div className={`schedule-row ${item.status}`} key={item.id}><div className="time">{formatClock(item.start_at)}<small>{formatClock(item.end_at)}</small></div><div className="schedule-info"><strong>{item.title}</strong><span>{item.notes || "Focus block"}</span></div><div className="row-actions">{item.status === "planned" && <><button onClick={() => onStart(item)}>Start</button><button onClick={() => onUpdate(item,"completed")}>Done</button><button onClick={() => onUpdate(item,"skipped")}>Skip</button></>}</div></div>) : <Empty text="No blocks planned." />}</div></div></section>;
+  </form></div><div className="panel"><div className="panel-head"><div><span className="eyebrow">{date}</span><h3>{date === localDate() ? "Today’s plan" : "Planned execution"}</h3><p className="muted small">{dateLabel}</p></div><div className="date-nav"><button className="ghost small-btn" type="button" onClick={() => shiftDate(-1)}>←</button><button className="ghost small-btn" type="button" onClick={() => shiftDate(1)}>→</button></div></div><div className="schedule-list">{schedule.length ? schedule.map(item => <div className={`schedule-row ${item.status}`} key={item.id}><div className="time">{formatClock(item.start_at)}<small>{formatClock(item.end_at)}</small></div><div className="schedule-info"><strong>{item.title}</strong><span>{item.notes || "Focus block"}{item.target_id && " · Target linked"}</span></div><div className="row-actions">{item.status === "planned" && <><button onClick={() => onStart(item)}>Start</button><button onClick={() => onUpdate(item,"completed")}>Done</button><button onClick={() => onUpdate(item,"skipped")}>Skip</button></>}</div></div>) : <Empty text="No blocks planned." />}</div></div></section>;
 }
 
 function HabitsView({ habits, onCreate }) {
