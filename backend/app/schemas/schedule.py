@@ -13,6 +13,7 @@ class ScheduleItemCreate(BaseModel):
     task_id: UUID | None = None
     habit_id: UUID | None = None
     project_id: UUID | None = None
+    target_id: UUID | None = None
     priority: int = Field(default=3, ge=1, le=5)
     status: str = Field(default="planned", min_length=1, max_length=32)
 
@@ -34,6 +35,7 @@ class ScheduleItemUpdate(BaseModel):
     task_id: UUID | None = None
     habit_id: UUID | None = None
     project_id: UUID | None = None
+    target_id: UUID | None = None
     priority: int | None = Field(default=None, ge=1, le=5)
     status: str | None = Field(default=None, min_length=1, max_length=32)
 
@@ -60,6 +62,7 @@ class ScheduleItemRead(BaseModel):
     task_id: UUID | None
     habit_id: UUID | None
     project_id: UUID | None
+    target_id: UUID | None
     title: str
     notes: str | None
     scheduled_date: date
