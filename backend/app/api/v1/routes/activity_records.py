@@ -17,6 +17,17 @@ from app.schemas.activity_record import ActivityRecordCreate, ActivityRecordRead
 
 router = APIRouter(prefix="/activity-records", tags=["activity-records"])
 
+METRIC_KEYS = {
+    "count": "count",
+    "problems_solved": "problems_solved",
+    "pages_read": "pages_read",
+    "sessions_completed": "sessions_completed",
+    "questions_solved": "questions_solved",
+    "topics_revised": "topics_revised",
+    "milestones_completed": "milestones_completed",
+    "books_completed": "books_completed",
+}
+
 
 def owned(db: Session, model, item_id: UUID, user_id: UUID):
     item = db.scalar(select(model).where(model.id == item_id, model.user_id == user_id))
@@ -35,7 +46,8 @@ def validate_links(db: Session, payload: ActivityRecordCreate, user_id: UUID):
     if payload.project_id is not None:
         owned(db, Project, payload.project_id, user_id)
     if payload.target_id is not None:
-        owned(db, Target, payload.target_id, user_id)
+        return owned(db, Target, payload.target_id, user_id)
+    return None
 
 
 @router.post("", response_model=ActivityRecordRead, status_code=status.HTTP_201_CREATED)
@@ -44,12 +56,19 @@ def create(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    validate_links(db, payload, user.id)
+    target = validate_links(db, payload, user.id)
+    if target is not None:
+        if payload.metric_value is None:
+            raise HTTPException(status_code=422, detail=f"Enter a measured value for target metric '{target.metric_type}'.")
+        expected_key = METRIC_KEYS.get(target.metric_type)
+        if expected_key is None:
+            raise HTTPException(status_code=422, detail=f"Unsupported target metric '{target.metric_type}'.")
+        if payload.details.get(expected_key) != payload.metric_value:
+            raise HTTPException(status_code=422, detail=f"details.{expected_key} must equal metric_value.")
+        target.current_value += payload.metric_value
+
     item = ActivityRecord(user_id=user.id, **payload.model_dump(exclude_none=True))
     db.add(item)
-    if payload.target_id is not None and payload.contribution_value is not None:
-        target = owned(db, Target, payload.target_id, user.id)
-        target.current_value += payload.contribution_value
     db.commit()
     db.refresh(item)
     return item
