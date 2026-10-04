@@ -237,7 +237,7 @@ function Dashboard({ token, onLogout }) {
 
   async function createRoutine(form) {
     await api("/routines", { method: "POST", body: JSON.stringify({
-      title: form.title, notes: form.notes || null, weekday: Number(form.weekday),
+      title: form.title, notes: form.notes || null, weekdays: form.weekdays.map(Number),
       start_time: form.start_time, end_time: form.end_time,
       habit_id: form.habit_id || null, target_id: form.target_id || null,
       priority: Number(form.priority), active: true
@@ -410,15 +410,16 @@ function TargetCard({ t }) {
 }
 
 function RoutineView({ date, routines, habits, targets, onCreate, onGenerate }) {
-  const [form, setForm] = useState({ title:"", notes:"", weekday:new Date().getDay() === 0 ? 6 : new Date().getDay()-1, start_time:"04:30", end_time:"05:30", habit_id:"", target_id:"", priority:3 });
   const days=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
-  const submit=async e=>{e.preventDefault(); await onCreate(form); setForm({...form,title:"",notes:"",habit_id:"",target_id:""});};
+  const [form, setForm] = useState({ title:"", notes:"", weekdays:[0,1,2,3,4,5,6], start_time:"04:30", end_time:"05:30", habit_id:"", target_id:"", priority:3 });
+  const toggleDay = (day) => setForm(prev => ({...prev, weekdays: prev.weekdays.includes(day) ? prev.weekdays.filter(d=>d!==day) : [...prev.weekdays, day].sort((a,b)=>a-b)}));
+  const submit=async e=>{e.preventDefault(); if(!form.weekdays.length) return; await onCreate(form); setForm({...form,title:"",notes:"",habit_id:"",target_id:""});};
   return <section className="two-col">
-    <div className="panel"><PanelTitle eyebrow="CORE ROUTINE" title="Build your recurring timetable" /><p className="muted small">This is the default. Daily emergencies or special events are changed only in Schedule.</p>
+    <div className="panel"><PanelTitle eyebrow="CORE ROUTINE" title="Build your recurring timetable" /><p className="muted small">Define each block once, choose the days it repeats, then generate that day's schedule. Emergencies or special events are changed only in Schedule.</p>
       <form className="form-grid" onSubmit={submit}>
         <label>Block title<input value={form.title} onChange={e=>setForm({...form,title:e.target.value})} placeholder="DSA Practice" required /></label>
         <label>Notes<textarea value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/></label>
-        <label>Day<select value={form.weekday} onChange={e=>setForm({...form,weekday:e.target.value})}>{days.map((d,i)=><option key={i} value={i}>{d}</option>)}</select></label>
+        <div><span className="field-label">REPEAT ON</span><div className="day-picker">{days.map((d,i)=><label className="day-option" key={i}><input type="checkbox" checked={form.weekdays.includes(i)} onChange={()=>toggleDay(i)} /><span>{d.slice(0,3)}</span></label>)}</div></div>
         <div className="inline-fields"><label>Start<input type="time" value={form.start_time} onChange={e=>setForm({...form,start_time:e.target.value})} required /></label><label>End<input type="time" value={form.end_time} onChange={e=>setForm({...form,end_time:e.target.value})} required /></label></div>
         <label>Habit<select value={form.habit_id} onChange={e=>setForm({...form,habit_id:e.target.value})}><option value="">No habit</option>{habits.map(h=><option key={h.id} value={h.id}>{h.name}</option>)}</select></label>
         <label>Monthly target<select value={form.target_id} onChange={e=>setForm({...form,target_id:e.target.value})}><option value="">No target</option>{targets.map(t=><option key={t.id} value={t.id}>{t.title}</option>)}</select></label>
@@ -435,45 +436,34 @@ function RoutineView({ date, routines, habits, targets, onCreate, onGenerate }) 
 
 function RoutineRow({ routine, days, habits, targets }) {
   const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState({
-    title: routine.title,
-    notes: routine.notes || "",
-    weekday: routine.weekday,
-    start_time: routine.start_time.slice(0,5),
-    end_time: routine.end_time.slice(0,5),
-    habit_id: routine.habit_id || "",
-    target_id: routine.target_id || "",
-    priority: routine.priority,
-  });
+  const [form, setForm] = useState({ title:routine.title, notes:routine.notes||"", weekdays:routine.weekdays||[], start_time:routine.start_time.slice(0,5), end_time:routine.end_time.slice(0,5), habit_id:routine.habit_id||"", target_id:routine.target_id||"", priority:routine.priority });
+  const toggleDay = (day) => setForm(prev => ({...prev, weekdays: prev.weekdays.includes(day) ? prev.weekdays.filter(d=>d!==day) : [...prev.weekdays, day].sort((a,b)=>a-b)}));
   const update = async () => {
+    if(!form.weekdays.length) return;
     const token = localStorage.getItem("nexus_token");
-    const payload = { ...form, weekday: Number(form.weekday), priority: Number(form.priority), habit_id: form.habit_id || null, target_id: form.target_id || null };
-    const response = await fetch(API + "/routines/" + routine.id, { method:"PATCH", headers:{ "Content-Type":"application/json", Authorization:"Bearer " + token }, body:JSON.stringify(payload) });
-    if (!response.ok) throw new Error("Failed to update routine.");
+    const payload = {...form, weekdays:form.weekdays.map(Number), priority:Number(form.priority), habit_id:form.habit_id||null, target_id:form.target_id||null};
+    const response = await fetch(API+"/routines/"+routine.id,{method:"PATCH",headers:{"Content-Type":"application/json",Authorization:"Bearer "+token},body:JSON.stringify(payload)});
+    if(!response.ok) throw new Error("Failed to update routine.");
     window.location.reload();
   };
   const remove = async () => {
-    if (!window.confirm("Delete this recurring routine block?")) return;
+    if(!window.confirm("Delete this recurring routine block?")) return;
     const token = localStorage.getItem("nexus_token");
-    const response = await fetch(API + "/routines/" + routine.id, { method:"DELETE", headers:{ Authorization:"Bearer " + token } });
-    if (!response.ok) throw new Error("Failed to delete routine.");
+    const response = await fetch(API+"/routines/"+routine.id,{method:"DELETE",headers:{Authorization:"Bearer "+token}});
+    if(!response.ok) throw new Error("Failed to delete routine.");
     window.location.reload();
   };
-  if (editing) return <div className="panel routine-edit-row">
-    <div className="form-grid">
-      <label>Title<input value={form.title} onChange={e=>setForm({...form,title:e.target.value})}/></label>
-      <label>Day<select value={form.weekday} onChange={e=>setForm({...form,weekday:e.target.value})}>{days.map((d,i)=><option key={i} value={i}>{d}</option>)}</select></label>
-      <div className="inline-fields"><label>Start<input type="time" value={form.start_time} onChange={e=>setForm({...form,start_time:e.target.value})}/></label><label>End<input type="time" value={form.end_time} onChange={e=>setForm({...form,end_time:e.target.value})}/></label></div>
-      <label>Habit<select value={form.habit_id} onChange={e=>setForm({...form,habit_id:e.target.value})}><option value="">No habit</option>{habits.map(h=><option key={h.id} value={h.id}>{h.name}</option>)}</select></label>
-      <label>Target<select value={form.target_id} onChange={e=>setForm({...form,target_id:e.target.value})}><option value="">No target</option>{targets.map(t=><option key={t.id} value={t.id}>{t.title}</option>)}</select></label>
-      <div className="row-actions"><button onClick={update}>Save</button><button onClick={()=>setEditing(false)}>Cancel</button><button className="danger-text" onClick={remove}>Delete</button></div>
-    </div>
-  </div>;
-  return <div className="schedule-row">
-    <div className="time">{days[routine.weekday]}<small>{routine.start_time.slice(0,5)}–{routine.end_time.slice(0,5)}</small></div>
-    <div className="schedule-info"><strong>{routine.title}</strong><span>{routine.habit_id ? "Habit linked" : "Routine block"}{routine.target_id ? " · Target linked" : ""}</span></div>
-    <div className="row-actions"><button onClick={()=>setEditing(true)}>Edit</button><button className="danger-text" onClick={remove}>Delete</button></div>
-  </div>;
+  if(editing) return <div className="panel routine-edit-row"><div className="form-grid">
+    <label>Title<input value={form.title} onChange={e=>setForm({...form,title:e.target.value})}/></label>
+    <label>Notes<textarea value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/></label>
+    <div><span className="field-label">REPEAT ON</span><div className="day-picker">{days.map((d,i)=><label className="day-option" key={i}><input type="checkbox" checked={form.weekdays.includes(i)} onChange={()=>toggleDay(i)}/><span>{d.slice(0,3)}</span></label>)}</div></div>
+    <div className="inline-fields"><label>Start<input type="time" value={form.start_time} onChange={e=>setForm({...form,start_time:e.target.value})}/></label><label>End<input type="time" value={form.end_time} onChange={e=>setForm({...form,end_time:e.target.value})}/></label></div>
+    <label>Habit<select value={form.habit_id} onChange={e=>setForm({...form,habit_id:e.target.value})}><option value="">No habit</option>{habits.map(h=><option key={h.id} value={h.id}>{h.name}</option>)}</select></label>
+    <label>Target<select value={form.target_id} onChange={e=>setForm({...form,target_id:e.target.value})}><option value="">No target</option>{targets.map(t=><option key={t.id} value={t.id}>{t.title}</option>)}</select></label>
+    <div className="row-actions"><button onClick={update}>Save</button><button onClick={()=>setEditing(false)}>Cancel</button><button className="danger-text" onClick={remove}>Delete</button></div>
+  </div></div>;
+  const dayLabel=(routine.weekdays||[]).map(i=>days[i]?.slice(0,3)).join(" · ");
+  return <div className="schedule-row"><div className="time">{dayLabel}<small>{routine.start_time.slice(0,5)}–{routine.end_time.slice(0,5)}</small></div><div className="schedule-info"><strong>{routine.title}</strong><span>{routine.habit_id?"Habit linked":"Routine block"}{routine.target_id?" · Target linked":""}</span></div><div className="row-actions"><button onClick={()=>setEditing(true)}>Edit</button><button className="danger-text" onClick={remove}>Delete</button></div></div>;
 }
 
 function ScheduleView({ date, schedule, targets, onDateChange, onCreate, onUpdate, onTargetChange, onStart }) {
