@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class ActivityRecordCreate(BaseModel):
     activity_type: str = Field(min_length=1, max_length=64)
+    metric_type: str | None = Field(default=None, max_length=64)
     title: str = Field(min_length=1, max_length=255)
     details: dict = Field(default_factory=dict)
     notes: str | None = None
