@@ -25,7 +25,9 @@ def inferred_metric_type(title: str) -> str:
         return "books_completed"
     if "english" in text and "session" in text:
         return "sessions_completed"
-    if "gate" in text and ("revision" in text or "question" in text):
+    if "gate" in text and "revision" in text:
+        return "topics_revised"
+    if "gate" in text and "question" in text:
         return "questions_solved"
     if "nexus" in text and ("complete" in text or "v1" in text):
         return "milestones_completed"
