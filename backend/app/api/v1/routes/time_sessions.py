@@ -104,11 +104,9 @@ def stop(
     session.ended_at = ended_at
     session.duration_seconds = duration
     session.status = "completed"
-    if session.schedule_item_id is not None:
-        schedule = owned(db, ScheduleItem, session.schedule_item_id, user.id)
-        if schedule.status == "planned":
-            schedule.status = "completed"
 
+    # Stopping a timer records actual work; it does not mean the scheduled block was finished.
+    # Schedule completion remains an explicit user action via the Done control.
     db.commit()
     db.refresh(session)
     return session
