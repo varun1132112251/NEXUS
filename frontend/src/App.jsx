@@ -462,8 +462,8 @@ function RoutineRow({ routine, days, habits, targets }) {
     <label>Target<select value={form.target_id} onChange={e=>setForm({...form,target_id:e.target.value})}><option value="">No target</option>{targets.map(t=><option key={t.id} value={t.id}>{t.title}</option>)}</select></label>
     <div className="row-actions"><button onClick={update}>Save</button><button onClick={()=>setEditing(false)}>Cancel</button><button className="danger-text" onClick={remove}>Delete</button></div>
   </div></div>;
-  const dayLabel=(routine.weekdays||[]).map(i=>days[i]?.slice(0,3)).join(" · ");
-  return <div className="schedule-row"><div className="time">{dayLabel}<small>{routine.start_time.slice(0,5)}–{routine.end_time.slice(0,5)}</small></div><div className="schedule-info"><strong>{routine.title}</strong><span>{routine.habit_id?"Habit linked":"Routine block"}{routine.target_id?" · Target linked":""}</span></div><div className="row-actions"><button onClick={()=>setEditing(true)}>Edit</button><button className="danger-text" onClick={remove}>Delete</button></div></div>;
+  const dayLabel=(routine.weekdays||[]).map(i=>days[i]?.slice(0,3)).filter(Boolean);
+  return <div className="routine-row"><div className="routine-days">{dayLabel.map((day,index)=><span className="routine-day active" key={index}>{day}</span>)}</div><div className="schedule-info"><strong>{routine.title}</strong><span>{routine.start_time.slice(0,5)}–{routine.end_time.slice(0,5)} · {routine.habit_id?"Habit linked":"Routine block"}{routine.target_id?" · Target linked":""}</span></div><div className="row-actions"><button onClick={()=>setEditing(true)}>Edit</button><button className="danger-text" onClick={remove}>Delete</button></div></div>;
 }
 
 function ScheduleView({ date, schedule, targets, onDateChange, onCreate, onUpdate, onTargetChange, onStart }) {
