@@ -12,7 +12,6 @@ from app.models.project import Project
 from app.models.schedule import ScheduleItem
 from app.models.task import Task
 from app.models.target import Target
-from app.models.target import Target
 from app.models.time_session import TimeSession
 from app.models.user import User
 from app.schemas.time_session import TimeSessionRead, TimeSessionStart
