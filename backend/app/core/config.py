@@ -14,7 +14,8 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://nexus:nexus@localhost:5432/nexus"
     jwt_secret_key: str
     jwt_algorithm: str = "HS256"
-    access_token_expire_minutes: int = 60\n    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    access_token_expire_minutes: int = 60
+    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
 
 @lru_cache
