@@ -68,8 +68,6 @@ def start(
             payload.project_id = schedule.project_id
         if payload.target_id is None:
             payload.target_id = schedule.target_id
-        if payload.target_id is None:
-            payload.target_id = schedule.target_id
 
     session = TimeSession(
         user_id=user.id,
@@ -106,6 +104,10 @@ def stop(
     session.ended_at = ended_at
     session.duration_seconds = duration
     session.status = "completed"
+    if session.schedule_item_id is not None:
+        schedule = owned(db, ScheduleItem, session.schedule_item_id, user.id)
+        if schedule.status == "planned":
+            schedule.status = "completed"
 
     db.commit()
     db.refresh(session)
