@@ -133,7 +133,7 @@ function Dashboard({ token, onLogout }) {
   async function load() {
     try {
       setError("");
-      const [analytics, schedule, current, targets, habits, history, activities, routines, diary] = await Promise.all([
+      const [analytics, schedule, current, targets, habits, habitStats, history, activities, routines, diary] = await Promise.all([
         api(`/analytics/summary?start_date=${date}&end_date=${date}`, {}, token),
         api(`/schedule?scheduled_date=${date}`, {}, token),
         api("/time-sessions/current", {}, token),
