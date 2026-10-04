@@ -94,7 +94,7 @@ def create(
         existing = db.scalar(select(ActivityRecord).where(ActivityRecord.user_id == user.id, ActivityRecord.time_session_id == payload.time_session_id))
         if existing is not None:
             raise HTTPException(status_code=409, detail="This time session has already been reviewed.")
-    metric_type = target.metric_type if target is not None else payload.activity_type
+    metric_type = target.metric_type if target is not None else (payload.metric_type or payload.activity_type)
     validate_details(metric_type, payload.details, payload.metric_value)
 
     if target is not None:
@@ -102,7 +102,9 @@ def create(
             raise HTTPException(status_code=422, detail=f"Enter a measured value for target metric '{target.metric_type}'.")
         target.current_value += payload.metric_value
 
-    item = ActivityRecord(user_id=user.id, **payload.model_dump(exclude_none=True))
+    item_payload = payload.model_dump(exclude_none=True)
+    item_payload.pop("metric_type", None)
+    item = ActivityRecord(user_id=user.id, **item_payload)
     db.add(item)
     db.commit()
     db.refresh(item)
