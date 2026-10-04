@@ -117,7 +117,7 @@ function App() {
 
 function Dashboard({ token, onLogout }) {
   const [view, setView] = useState("Overview");
-  const [data, setData] = useState({ analytics: null, schedule: [], current: null, targets: [], habits: [], history: [], activities: [], diary: [] });
+  const [data, setData] = useState({ analytics: null, schedule: [], current: null, targets: [], habits: [], history: [], activities: [], routines: [], diary: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [timerTitle, setTimerTitle] = useState("");
@@ -131,7 +131,7 @@ function Dashboard({ token, onLogout }) {
   async function load() {
     try {
       setError("");
-      const [analytics, schedule, current, targets, habits, history, activities, diary] = await Promise.all([
+      const [analytics, schedule, current, targets, habits, history, activities, routines, diary] = await Promise.all([
         api(`/analytics/summary?start_date=${date}&end_date=${date}`, {}, token),
         api(`/schedule?scheduled_date=${date}`, {}, token),
         api("/time-sessions/current", {}, token),
@@ -139,9 +139,10 @@ function Dashboard({ token, onLogout }) {
         api("/habits", {}, token),
         api("/time-sessions", {}, token),
         api("/activity-records", {}, token),
+        api("/routines", {}, token),
         api(`/diary?entry_date=${date}`, {}, token),
       ]);
-      setData({ analytics, schedule, current, targets, habits, history, activities, diary });
+      setData({ analytics, schedule, current, targets, habits, history, activities, routines, diary });
       if (current) setTimerTitle(current.title);
     } catch (err) {
       setError(err.message);
@@ -234,6 +235,23 @@ function Dashboard({ token, onLogout }) {
     setData(prev => ({ ...prev, schedule }));
   }
 
+  async function createRoutine(form) {
+    await api("/routines", { method: "POST", body: JSON.stringify({
+      title: form.title, notes: form.notes || null, weekday: Number(form.weekday),
+      start_time: form.start_time, end_time: form.end_time,
+      habit_id: form.habit_id || null, target_id: form.target_id || null,
+      priority: Number(form.priority), active: true
+    }) }, token);
+    await load();
+  }
+
+  async function generateRoutine(targetDate) {
+    await api("/routines/generate/" + targetDate, { method: "POST" }, token);
+    await loadScheduleFor(targetDate);
+    setView("Schedule");
+    setScheduleDate(targetDate);
+  }
+
   async function createSchedule(form) {
     await api("/schedule", { method: "POST", body: JSON.stringify({
       title: form.title, notes: form.notes || null, scheduled_date: form.scheduled_date,
@@ -273,7 +291,7 @@ function Dashboard({ token, onLogout }) {
 
   if (loading) return <div className="loading">Loading NEXUS<span>•</span><span>•</span><span>•</span></div>;
 
-  const nav = ["Overview", "Schedule", "Habits", "Targets", "History", "Diary"];
+  const nav = ["Overview", "Routine", "Schedule", "Habits", "Targets", "History", "Diary"];
 
   return <div className="app-shell">
     <aside className="sidebar">
@@ -291,7 +309,7 @@ function Dashboard({ token, onLogout }) {
       {error && <div className="error banner">{error}</div>}
 
       {view === "Overview" && <Overview data={data} targets={targets} actualRunning={actualRunning} timerTitle={timerTitle} setTimerTitle={setTimerTitle} startTimer={startTimer} stopTimer={stopTimer} activityForm={activityForm} setActivityForm={setActivityForm} markSchedule={markSchedule} onTargetChange={updateScheduleTarget} totals={totals} />}
-      {view === "Schedule" && <ScheduleView date={scheduleDate} schedule={data.schedule} targets={data.targets} onDateChange={async (next) => { setScheduleDate(next); await loadScheduleFor(next); }} onCreate={createSchedule} onUpdate={markSchedule} onTargetChange={updateScheduleTarget} onStart={startSchedule} />}
+      {view === "Routine" && <RoutineView date={scheduleDate} routines={data.routines} habits={data.habits} targets={data.targets} onCreate={createRoutine} onGenerate={generateRoutine} />}\n      {view === "Schedule" && <ScheduleView date={scheduleDate} schedule={data.schedule} targets={data.targets} onDateChange={async (next) => { setScheduleDate(next); await loadScheduleFor(next); }} onCreate={createSchedule} onUpdate={markSchedule} onTargetChange={updateScheduleTarget} onStart={startSchedule} />}
       {view === "Habits" && <HabitsView habits={data.habits} onCreate={createHabit} />}
       {view === "Targets" && <TargetsView targets={targets} onCreate={createTarget} onUpdate={updateTarget} />}
       {view === "History" && <HistoryView history={data.history} activities={data.activities} targets={data.targets} habits={data.habits} onReview={saveActivity} />}
@@ -389,6 +407,30 @@ function MetricCapture({ target, form, setForm }) {
 function TargetCard({ t }) {
   const p = t.progress_percent || 0;
   return <div className="target"><div className="target-line"><strong>{t.title}</strong><span>{t.current_value}/{t.target_value ?? "—"}</span></div><div className="progress"><i style={{ width: `${Math.min(100, p)}%` }} /></div><small>{METRIC_LABELS[t.metric_type] || t.metric_type} · {p.toFixed(0)}% complete</small></div>;
+}
+
+function RoutineView({ date, routines, habits, targets, onCreate, onGenerate }) {
+  const [form, setForm] = useState({ title:"", notes:"", weekday:new Date().getDay() === 0 ? 6 : new Date().getDay()-1, start_time:"04:30", end_time:"05:30", habit_id:"", target_id:"", priority:3 });
+  const days=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+  const submit=async e=>{e.preventDefault(); await onCreate(form); setForm({...form,title:"",notes:"",habit_id:"",target_id:""});};
+  return <section className="two-col">
+    <div className="panel"><PanelTitle eyebrow="CORE ROUTINE" title="Build your recurring timetable" /><p className="muted small">This is the default. Daily emergencies or special events are changed only in Schedule.</p>
+      <form className="form-grid" onSubmit={submit}>
+        <label>Block title<input value={form.title} onChange={e=>setForm({...form,title:e.target.value})} placeholder="DSA Practice" required /></label>
+        <label>Notes<textarea value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/></label>
+        <label>Day<select value={form.weekday} onChange={e=>setForm({...form,weekday:e.target.value})}>{days.map((d,i)=><option key={i} value={i}>{d}</option>)}</select></label>
+        <div className="inline-fields"><label>Start<input type="time" value={form.start_time} onChange={e=>setForm({...form,start_time:e.target.value})} required /></label><label>End<input type="time" value={form.end_time} onChange={e=>setForm({...form,end_time:e.target.value})} required /></label></div>
+        <label>Habit<select value={form.habit_id} onChange={e=>setForm({...form,habit_id:e.target.value})}><option value="">No habit</option>{habits.map(h=><option key={h.id} value={h.id}>{h.name}</option>)}</select></label>
+        <label>Monthly target<select value={form.target_id} onChange={e=>setForm({...form,target_id:e.target.value})}><option value="">No target</option>{targets.map(t=><option key={t.id} value={t.id}>{t.title}</option>)}</select></label>
+        <label>Priority<select value={form.priority} onChange={e=>setForm({...form,priority:e.target.value})}><option value="1">1 — Critical</option><option value="2">2 — High</option><option value="3">3 — Normal</option><option value="4">4 — Low</option><option value="5">5 — Lowest</option></select></label>
+        <button className="primary">Add recurring block</button>
+      </form>
+    </div>
+    <div className="panel"><PanelTitle eyebrow="YOUR ROUTINE" title="Recurring blocks" />
+      {routines.length ? <div className="schedule-list">{routines.map(r=><div className="schedule-row" key={r.id}><div className="time">{days[r.weekday]}<small>{r.start_time.slice(0,5)}–{r.end_time.slice(0,5)}</small></div><div className="schedule-info"><strong>{r.title}</strong><span>{r.habit_id ? "Habit linked" : "Routine block"}{r.target_id ? " · Target linked" : ""}</span></div></div>)}</div> : <Empty text="No core routine blocks yet." />}
+      <button className="primary full" onClick={()=>onGenerate(date)}>Generate {date} from routine</button>
+    </div>
+  </section>;
 }
 
 function ScheduleView({ date, schedule, targets, onDateChange, onCreate, onUpdate, onTargetChange, onStart }) {
