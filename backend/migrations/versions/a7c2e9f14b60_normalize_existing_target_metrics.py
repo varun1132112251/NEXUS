@@ -1,13 +1,13 @@
 """normalize target metric types for existing targets
 
 Revision ID: a7c2e9f14b60
-Revises: f4b8d2e91a30
+Revises: 8f9a1b2c3d40
 Create Date: 2026-10-04
 """
 from alembic import op
 
 revision = "a7c2e9f14b60"
-down_revision = "f4b8d2e91a30"
+down_revision = "8f9a1b2c3d40"
 branch_labels = None
 depends_on = None
 
