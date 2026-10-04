@@ -245,7 +245,7 @@ function Dashboard({ token, onLogout }) {
 
   async function createHabit(form) {
     await api("/habits", { method: "POST", body: JSON.stringify({
-      name: form.name, description: form.description || null, category: form.category || "general", frequency: form.frequency || "daily"
+      name: form.name, description: form.description || null, category: form.category || "general", frequency: form.frequency || "daily", metric_type: form.metric_type || "count"
     }) }, token);
     await load();
   }
@@ -414,9 +414,9 @@ function ScheduleView({ date, schedule, targets, onDateChange, onCreate, onUpdat
 }
 
 function HabitsView({ habits, onCreate }) {
-  const [form, setForm] = useState({ name:"", description:"", category:"study", frequency:"daily" });
-  const submit = async e => { e.preventDefault(); await onCreate(form); setForm({ name:"", description:"", category:"study", frequency:"daily" }); };
-  return <section className="two-col"><div className="panel"><PanelTitle eyebrow="ROUTINE" title="Create habit" /><form className="form-grid" onSubmit={submit}><label>Name<input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} required /></label><label>Description<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label><label>Category<input value={form.category} onChange={e=>setForm({...form,category:e.target.value})}/></label><label>Frequency<select value={form.frequency} onChange={e=>setForm({...form,frequency:e.target.value})}><option>daily</option><option>weekly</option><option>custom</option></select></label><button className="primary">Create habit</button></form></div><div className="panel"><PanelTitle eyebrow="ACTIVE" title="Your habits" />{habits.length ? <div className="item-list">{habits.map(h=><div className="list-item" key={h.id}><div><strong>{h.name}</strong><span>{h.category} · {h.frequency}</span></div><b>{h.active ? "ACTIVE" : "OFF"}</b></div>)}</div> : <Empty text="No habits yet." />}</div></section>;
+  const [form, setForm] = useState({ name:"", description:"", category:"study", frequency:"daily", metric_type:"count" });
+  const submit = async e => { e.preventDefault(); await onCreate(form); setForm({ name:"", description:"", category:"study", frequency:"daily", metric_type:"count" }); };
+  return <section className="two-col"><div className="panel"><PanelTitle eyebrow="ROUTINE" title="Create habit" /><form className="form-grid" onSubmit={submit}><label>Name<input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} required /></label><label>Description<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label><label>Category<input value={form.category} onChange={e=>setForm({...form,category:e.target.value})}/></label><label>Frequency<select value={form.frequency} onChange={e=>setForm({...form,frequency:e.target.value})}><option>daily</option><option>weekly</option><option>custom</option></select></label><label>Activity metric<select value={form.metric_type} onChange={e=>setForm({...form,metric_type:e.target.value})}>{METRIC_OPTIONS.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label><button className="primary">Create habit</button></form></div><div className="panel"><PanelTitle eyebrow="ACTIVE" title="Your habits" />{habits.length ? <div className="item-list">{habits.map(h=><div className="list-item" key={h.id}><div><strong>{h.name}</strong><span>{h.category} · {h.frequency} · {METRIC_LABELS[h.metric_type] || "Generic count"}</span></div><b>{h.active ? "ACTIVE" : "OFF"}</b></div>)}</div> : <Empty text="No habits yet." />}</div></section>;
 }
 
 function TargetsView({ targets, onCreate, onUpdate }) {
