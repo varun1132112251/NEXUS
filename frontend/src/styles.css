@@ -26,3 +26,8 @@ nav button{border:0;background:transparent;text-align:left;width:100%;padding:11
 .routine-day.active{border-color:#d7ff48;color:#d7ff48;background:#12180b}
 .routine-row{display:grid;grid-template-columns:220px minmax(0,1fr) auto;gap:14px;align-items:center}
 @media(max-width:800px){.routine-row{grid-template-columns:1fr}.routine-days{max-width:none}}
+
+.target-card-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;margin-top:18px}
+.target-card-row .target{margin-top:0}
+.target-editor{display:grid;gap:12px;margin-top:18px;padding:14px;border:1px solid #29313d;border-radius:10px;background:#0a0e14}
+.danger-text{color:#ff8790!important;border-color:#5d2930!important}
