@@ -28,6 +28,39 @@ METRIC_KEYS = {
     "books_completed": "books_completed",
 }
 
+DETAIL_INT_KEYS = {"attempted", "mistakes", "words_learned", "questions_solved", "pages_read", "problems_solved", "sessions_completed", "topics_revised", "milestones_completed", "books_completed", "count"}
+DETAIL_FLOAT_KEYS = {"accuracy"}
+
+def validate_details(metric_type: str, details: dict, metric_value: int | None) -> None:
+    expected_key = METRIC_KEYS.get(metric_type)
+    if expected_key is None:
+        raise HTTPException(status_code=422, detail=f"Unsupported activity metric '{metric_type}'.")
+
+    if metric_value is not None:
+        expected_value = details.get(expected_key)
+        if expected_value != metric_value:
+            raise HTTPException(
+                status_code=422,
+                detail=f"details.{expected_key} must equal metric_value.",
+            )
+
+    for key in DETAIL_INT_KEYS.intersection(details):
+        value = details[key]
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise HTTPException(status_code=422, detail=f"details.{key} must be a non-negative integer.")
+
+    for key in DETAIL_FLOAT_KEYS.intersection(details):
+        value = details[key]
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= float(value) <= 100:
+            raise HTTPException(status_code=422, detail=f"details.{key} must be between 0 and 100.")
+
+    if metric_type == "problems_solved":
+        attempted = details.get("attempted")
+        solved = details.get("problems_solved")
+        if attempted is not None and solved is not None and solved > attempted:
+            raise HTTPException(status_code=422, detail="Solved problems cannot exceed attempted problems.")
+
+
 
 def owned(db: Session, model, item_id: UUID, user_id: UUID):
     item = db.scalar(select(model).where(model.id == item_id, model.user_id == user_id))
@@ -61,14 +94,12 @@ def create(
         existing = db.scalar(select(ActivityRecord).where(ActivityRecord.user_id == user.id, ActivityRecord.time_session_id == payload.time_session_id))
         if existing is not None:
             raise HTTPException(status_code=409, detail="This time session has already been reviewed.")
+    metric_type = target.metric_type if target is not None else payload.activity_type
+    validate_details(metric_type, payload.details, payload.metric_value)
+
     if target is not None:
         if payload.metric_value is None:
             raise HTTPException(status_code=422, detail=f"Enter a measured value for target metric '{target.metric_type}'.")
-        expected_key = METRIC_KEYS.get(target.metric_type)
-        if expected_key is None:
-            raise HTTPException(status_code=422, detail=f"Unsupported target metric '{target.metric_type}'.")
-        if payload.details.get(expected_key) != payload.metric_value:
-            raise HTTPException(status_code=422, detail=f"details.{expected_key} must equal metric_value.")
         target.current_value += payload.metric_value
 
     item = ActivityRecord(user_id=user.id, **payload.model_dump(exclude_none=True))
