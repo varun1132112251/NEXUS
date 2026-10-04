@@ -1,5 +1,5 @@
 from datetime import date
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class AnalyticsTotals(BaseModel):
@@ -9,7 +9,7 @@ class AnalyticsTotals(BaseModel):
     completed_items: int
     skipped_items: int
     schedule_completion_rate: float
-    time_execution_rate: float
+    time_execution_rate: float = Field(default=0.0)
     session_count: int
     activity_count: int
     diary_days: int
