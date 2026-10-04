@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 class RoutineTemplateCreate(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     notes: str | None = None
-    weekday: int = Field(ge=0, le=6)
+    weekdays: list[int] = Field(min_length=1, max_length=7)
     start_time: time
     end_time: time
     habit_id: UUID | None = None
@@ -21,13 +21,17 @@ class RoutineTemplateCreate(BaseModel):
     def validate_times(self):
         if self.end_time <= self.start_time:
             raise ValueError("end_time must be after start_time.")
+        if any(day < 0 or day > 6 for day in self.weekdays):
+            raise ValueError("weekdays must contain values from 0 (Monday) to 6 (Sunday).")
+        if len(set(self.weekdays)) != len(self.weekdays):
+            raise ValueError("weekdays must not contain duplicates.")
         return self
 
 
 class RoutineTemplateUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=255)
     notes: str | None = None
-    weekday: int | None = Field(default=None, ge=0, le=6)
+    weekdays: list[int] | None = Field(default=None, min_length=1, max_length=7)
     start_time: time | None = None
     end_time: time | None = None
     habit_id: UUID | None = None
@@ -48,7 +52,7 @@ class RoutineTemplateRead(BaseModel):
     target_id: UUID | None
     title: str
     notes: str | None
-    weekday: int
+    weekdays: list[int]
     start_time: time
     end_time: time
     priority: int
