@@ -105,8 +105,13 @@ def stop(
     session.duration_seconds = duration
     session.status = "completed"
 
-    # Stopping a timer records actual work; it does not mean the scheduled block was finished.
-    # Schedule completion remains an explicit user action via the Done control.
+    # Stopping a timer records actual work without deciding schedule completion.
+    # Mark the linked block partial only when it is still planned and real time was recorded.
+    if session.schedule_item_id is not None:
+        schedule = owned(db, ScheduleItem, session.schedule_item_id, user.id)
+        if schedule.status == "planned" and duration > 0:
+            schedule.status = "partial"
+
     db.commit()
     db.refresh(session)
     return session
