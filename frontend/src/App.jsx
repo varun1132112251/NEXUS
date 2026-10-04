@@ -1,3 +1,4 @@
+import AnalyticsView from "./AnalyticsView";
 import React, { useEffect, useMemo, useState } from "react";
 
 const API = "http://127.0.0.1:8000/api/v1";
@@ -291,7 +292,7 @@ function Dashboard({ token, onLogout }) {
 
   if (loading) return <div className="loading">Loading NEXUS<span>•</span><span>•</span><span>•</span></div>;
 
-  const nav = ["Overview", "Routine", "Schedule", "Habits", "Targets", "History", "Diary"];
+  const nav = ["Overview", "Routine", "Schedule", "Habits", "Targets", "History", "Analytics", "Diary"];
 
   return <div className="app-shell">
     <aside className="sidebar">
@@ -313,6 +314,7 @@ function Dashboard({ token, onLogout }) {
       {view === "Habits" && <HabitsView habits={data.habits} onCreate={createHabit} />}
       {view === "Targets" && <TargetsView targets={targets} onCreate={createTarget} onUpdate={updateTarget} />}
       {view === "History" && <HistoryView history={data.history} activities={data.activities} targets={data.targets} habits={data.habits} onReview={saveActivity} />}
+      {view === "Analytics" && <AnalyticsView token={token} />}
       {view === "Diary" && <DiaryView date={date} existing={data.diary[0]} onSave={createDiary} />}
     </main>
   </div>;
