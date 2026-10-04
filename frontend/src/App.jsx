@@ -205,17 +205,19 @@ function Dashboard({ token, onLogout }) {
     await load();
   }
 
-  async function updateScheduleTarget(item, targetId) {
+  async function updateScheduleTarget(item, targetId, refreshDate = null) {
     try {
       await api(`/schedule/${item.id}`, { method: "PATCH", body: JSON.stringify({ target_id: targetId || null }) }, token);
-      await load();
+      if (refreshDate) await loadScheduleFor(refreshDate);
+      else await load();
     } catch (err) { setError(err.message); }
   }
 
-  async function markSchedule(item, status) {
+  async function markSchedule(item, status, refreshDate = null) {
     try {
       await api(`/schedule/${item.id}`, { method: "PATCH", body: JSON.stringify({ status }) }, token);
-      await load();
+      if (refreshDate) await loadScheduleFor(refreshDate);
+      else await load();
     } catch (err) { setError(err.message); }
   }
 
@@ -320,7 +322,7 @@ function Dashboard({ token, onLogout }) {
       {error && <div className="error banner">{error}</div>}
 
       {view === "Overview" && <Overview data={data} targets={targets} actualRunning={actualRunning} timerTitle={timerTitle} setTimerTitle={setTimerTitle} startTimer={startTimer} stopTimer={stopTimer} activityForm={activityForm} setActivityForm={setActivityForm} markSchedule={markSchedule} onTargetChange={updateScheduleTarget} totals={totals} />}
-      {view === "Routine" && <RoutineView date={scheduleDate} routines={data.routines} habits={data.habits} targets={data.targets} onCreate={createRoutine} onGenerate={generateRoutine} />}\n      {view === "Schedule" && <ScheduleView date={scheduleDate} schedule={data.schedule} targets={data.targets} onDateChange={async (next) => { setScheduleDate(next); await loadScheduleFor(next); }} onCreate={createSchedule} onUpdate={markSchedule} onTargetChange={updateScheduleTarget} onStart={startSchedule} />}
+      {view === "Routine" && <RoutineView date={scheduleDate} routines={data.routines} habits={data.habits} targets={data.targets} onCreate={createRoutine} onGenerate={generateRoutine} />}\n      {view === "Schedule" && <ScheduleView date={scheduleDate} schedule={data.schedule} targets={data.targets} onDateChange={async (next) => { setScheduleDate(next); await loadScheduleFor(next); }} onCreate={createSchedule} onUpdate={(item, status) => markSchedule(item, status, scheduleDate)} onTargetChange={(item, targetId) => updateScheduleTarget(item, targetId, scheduleDate)} onStart={startSchedule} />}
       {view === "Habits" && <HabitsView habits={data.habits} habitStats={data.habitStats} onCreate={createHabit} />}
       {view === "Targets" && <TargetsView targets={targets} onCreate={createTarget} onUpdate={updateTarget} onDelete={deleteTarget} />}
       {view === "History" && <HistoryView history={data.history} activities={data.activities} targets={data.targets} habits={data.habits} onReview={saveActivity} />}
