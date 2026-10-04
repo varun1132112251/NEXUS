@@ -394,7 +394,7 @@ function MetricCapture({ target, form, setForm }) {
       <label>Topic<input value={form.topic} onChange={e=>update("topic",e.target.value)} /></label>
       <label>Words learned<input type="number" min="0" value={form.words_learned} onChange={e=>update("words_learned",e.target.value)} /></label>
       <label>Accuracy %<input type="number" min="0" max="100" value={form.accuracy} onChange={e=>update("accuracy",e.target.value)} /></label>
-    </div>
+    </div>}
     {target.metric_type === "questions_solved" && <div className="capture-grid">
       <label>Subject<input value={form.subject} onChange={e=>update("subject",e.target.value)} /></label>
       <label>Topic<input value={form.topic} onChange={e=>update("topic",e.target.value)} /></label>
