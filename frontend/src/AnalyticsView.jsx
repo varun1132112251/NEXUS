@@ -113,7 +113,7 @@ function AnalyticsView({ token }) {
       </div>
 
       <div className="panel" style={{ marginTop: "1rem" }}>
-        <PanelTitle eyebrow="TARGETS" title="Progress in selected range" />
+        <PanelTitle eyebrow="TARGETS" title="Current target progress" />
         {data.target_progress?.length ? data.target_progress.map(target =>
           <div key={target.id} className="target">
             <div className="target-line"><strong>{target.title}</strong><span>{target.current_value}/{target.target_value ?? "—"}</span></div>
