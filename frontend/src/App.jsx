@@ -117,7 +117,7 @@ function App() {
 
 function Dashboard({ token, onLogout }) {
   const [view, setView] = useState("Overview");
-  const [data, setData] = useState({ analytics: null, schedule: [], current: null, targets: [], habits: [], history: [], diary: [] });
+  const [data, setData] = useState({ analytics: null, schedule: [], current: null, targets: [], habits: [], history: [], activities: [], diary: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [timerTitle, setTimerTitle] = useState("");
@@ -131,16 +131,17 @@ function Dashboard({ token, onLogout }) {
   async function load() {
     try {
       setError("");
-      const [analytics, schedule, current, targets, habits, history, diary] = await Promise.all([
+      const [analytics, schedule, current, targets, habits, history, activities, diary] = await Promise.all([
         api(`/analytics/summary?start_date=${date}&end_date=${date}`, {}, token),
         api(`/schedule?scheduled_date=${date}`, {}, token),
         api("/time-sessions/current", {}, token),
         api(`/targets?month=${month}`, {}, token),
         api("/habits", {}, token),
         api("/time-sessions", {}, token),
+        api("/activity-records", {}, token),
         api(`/diary?entry_date=${date}`, {}, token),
       ]);
-      setData({ analytics, schedule, current, targets, habits, history, diary });
+      setData({ analytics, schedule, current, targets, habits, history, activities, diary });
       if (current) setTimerTitle(current.title);
     } catch (err) {
       setError(err.message);
@@ -183,57 +184,21 @@ function Dashboard({ token, onLogout }) {
 
   async function stopTimer() {
     if (!data.current) return;
-    const target = data.targets.find(t => t.id === data.current.target_id);
-    if (target && (activityForm.metric_value === "" || Number(activityForm.metric_value) < 0 || Number.isNaN(Number(activityForm.metric_value)))) {
-      setError("Enter the measured value for " + METRIC_LABELS[target.metric_type] + ".");
-      return;
-    }
     try {
-      const session = await api("/time-sessions/" + data.current.id + "/stop", { method: "POST" }, token);
-      if (target) {
-        const value = Math.max(0, Number(activityForm.metric_value) || 0);
-        const details = {
-          duration_seconds: session.duration_seconds,
-          schedule_item_id: session.schedule_item_id,
-          task_id: session.task_id,
-          habit_id: session.habit_id,
-          project_id: session.project_id,
-          ...Object.fromEntries(Object.entries(activityForm).filter(([key, val]) => key !== "metric_value" && val !== ""))
-        };
-        details[metricKey(target.metric_type)] = value;
-        await api("/activity-records", {
-          method: "POST",
-          body: JSON.stringify({
-            activity_type: target.metric_type,
-            title: session.title,
-            details,
-            notes: "Execution activity recorded by NEXUS.",
-            time_session_id: session.id,
-            task_id: session.task_id,
-            habit_id: session.habit_id,
-            project_id: session.project_id,
-            target_id: session.target_id,
-            metric_value: value
-          })
-        }, token);
-      } else {
-        await api("/activity-records", {
-          method: "POST",
-          body: JSON.stringify({
-            activity_type: "execution",
-            title: session.title,
-            details: { duration_seconds: session.duration_seconds },
-            notes: "Execution session recorded by NEXUS.",
-            time_session_id: session.id,
-            task_id: session.task_id,
-            habit_id: session.habit_id,
-            project_id: session.project_id
-          })
-        }, token);
-      }
+      await api("/time-sessions/" + data.current.id + "/stop", { method: "POST" }, token);
       setActivityForm({ metric_value: "", topic: "", book: "", chapter: "", practice_type: "", workstream: "", milestone: "", accuracy: "", attempted: "", mistakes: "", words_learned: "", key_concepts: "", subject: "", difficulty: "" });
       await load();
+      setView("History");
     } catch (err) { setError(err.message); }
+  }
+
+  async function saveActivity(session, form, metricType) {
+    const value = Number(form.metric_value);
+    if (!Number.isFinite(value) || value < 0) throw new Error("Enter a valid measured value.");
+    const details = { duration_seconds: session.duration_seconds, ...Object.fromEntries(Object.entries(form).filter(([key, val]) => key !== "metric_value" && val !== "")) };
+    details[metricKey(metricType)] = value;
+    await api("/activity-records", { method: "POST", body: JSON.stringify({ activity_type: metricType, title: session.title, details, notes: "Activity review recorded by NEXUS.", time_session_id: session.id, task_id: session.task_id, habit_id: session.habit_id, project_id: session.project_id, target_id: session.target_id, metric_value: value }) }, token);
+    await load();
   }
 
   async function updateScheduleTarget(item, targetId) {
@@ -329,7 +294,7 @@ function Dashboard({ token, onLogout }) {
       {view === "Schedule" && <ScheduleView date={scheduleDate} schedule={data.schedule} targets={data.targets} onDateChange={async (next) => { setScheduleDate(next); await loadScheduleFor(next); }} onCreate={createSchedule} onUpdate={markSchedule} onTargetChange={updateScheduleTarget} onStart={startSchedule} />}
       {view === "Habits" && <HabitsView habits={data.habits} onCreate={createHabit} />}
       {view === "Targets" && <TargetsView targets={targets} onCreate={createTarget} onUpdate={updateTarget} />}
-      {view === "History" && <HistoryView history={data.history} />}
+      {view === "History" && <HistoryView history={data.history} activities={data.activities} targets={data.targets} habits={data.habits} onReview={saveActivity} />}
       {view === "Diary" && <DiaryView date={date} existing={data.diary[0]} onSave={createDiary} />}
     </main>
   </div>;
@@ -467,10 +432,27 @@ function TargetsView({ targets, onCreate, onUpdate }) {
   </form></div><div className="panel"><PanelTitle eyebrow="OCTOBER" title="Targets" />{targets.length ? targets.map(t=><div key={t.id}><TargetCard t={t}/><label className="target-metric-editor">Progress metric<select value={t.metric_type || "count"} onChange={e=>onUpdate(t.id,{metric_type:e.target.value})}>{METRIC_OPTIONS.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label></div>) : <Empty text="No monthly targets yet." />}</div></section>;
 }
 
-function HistoryView({ history }) {
-  return <section className="panel"><PanelTitle eyebrow="EXECUTION LOG" title="Completed sessions" />{history.length ? <div className="history-list">{history.map(s=><div className="history-row" key={s.id}><div><strong>{s.title}</strong><span>{new Date(s.started_at).toLocaleDateString()} · {new Date(s.started_at).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</span></div><b>{formatSeconds(s.duration_seconds)}</b></div>)}</div> : <Empty text="No completed sessions yet. Start your first focus session." />}</section>;
+function HistoryView({ history, activities, targets, habits, onReview }) {
+  return <section className="panel"><PanelTitle eyebrow="EXECUTION LOG" title="Completed sessions" />
+    {history.length ? <div className="history-list">{history.map(s => {
+      const reviewed = activities.some(a => a.time_session_id === s.id);
+      const target = s.target_id ? targets.find(t => t.id === s.target_id) : null;
+      const habit = s.habit_id ? habits.find(h => h.id === s.habit_id) : null;
+      const metricType = target?.metric_type || habit?.metric_type || "count";
+      return <HistoryRow key={s.id} session={s} reviewed={reviewed} target={target} habit={habit} metricType={metricType} onReview={onReview} />;
+    })}</div> : <Empty text="No completed sessions yet. Start your first focus session." />}</section>;
 }
 
+function HistoryRow({ session, reviewed, target, habit, metricType, onReview }) {
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({ metric_value:"", topic:"", book:"", chapter:"", practice_type:"", workstream:"", milestone:"", accuracy:"", attempted:"", mistakes:"", words_learned:"", key_concepts:"", subject:"", difficulty:"" });
+  const submit = async e => { e.preventDefault(); try { await onReview(session, form, metricType); setOpen(false); } catch (err) { alert(err.message); } };
+  return <div className="history-row history-review-row">
+    <div><strong>{session.title}</strong><span>{new Date(session.started_at).toLocaleDateString()} · {new Date(session.started_at).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})} · {formatSeconds(session.duration_seconds)}</span><span>{target ? "Target: " + target.title : habit ? "Habit: " + habit.name : "Unlinked session"}</span></div>
+    {reviewed ? <b>REVIEWED</b> : <button onClick={() => setOpen(v => !v)}>{open ? "Close" : "Review"}</button>}
+    {open && !reviewed && <div className="review-box"><MetricCapture target={{ metric_type: metricType }} form={form} setForm={setForm} /><button className="primary" onClick={submit}>Save activity review</button></div>}
+  </div>;
+}
 function DiaryView({ date, existing, onSave }) {
   const [form, setForm] = useState({
     accomplishments: existing?.accomplishments || "", what_went_badly: existing?.what_went_badly || "", learned: existing?.learned || "",
