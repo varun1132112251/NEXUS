@@ -57,6 +57,10 @@ def create(
     user: User = Depends(get_current_user),
 ):
     target = validate_links(db, payload, user.id)
+    if payload.time_session_id is not None:
+        existing = db.scalar(select(ActivityRecord).where(ActivityRecord.user_id == user.id, ActivityRecord.time_session_id == payload.time_session_id))
+        if existing is not None:
+            raise HTTPException(status_code=409, detail="This time session has already been reviewed.")
     if target is not None:
         if payload.metric_value is None:
             raise HTTPException(status_code=422, detail=f"Enter a measured value for target metric '{target.metric_type}'.")
