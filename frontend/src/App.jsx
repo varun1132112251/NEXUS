@@ -324,7 +324,7 @@ function Overview({ data, targets, actualRunning, timerTitle, setTimerTitle, sta
       <div className={`timer-card ${data.current ? "running" : ""}`}>
         <div className="card-top"><span className="eyebrow">FOCUS TIMER</span><span className="live-dot">{data.current ? "RUNNING" : "READY"}</span></div>
         <div className="timer-value">{formatSeconds(data.current ? actualRunning : 0)}</div>
-        {data.current ? <><div className="timer-title">{data.current.title}</div>{data.current.target_id && <MetricCapture target={targets.find(t => t.id === data.current.target_id)} form={activityForm} setForm={setActivityForm} />}<button className="danger full" onClick={stopTimer}>Stop session</button></>
+        {data.current ? <><div className="timer-title">{data.current.title}</div><p className="muted small">Time is tracked automatically. Review what you accomplished after stopping.</p><button className="danger full" onClick={stopTimer}>Stop session</button></>
           : <div className="timer-start"><input placeholder="What are you working on?" value={timerTitle} onChange={e => setTimerTitle(e.target.value)} onKeyDown={e => e.key === "Enter" && startTimer()} /><button className="primary" onClick={startTimer}>Start</button></div>}
       </div>
       <div className="stat-card"><span className="eyebrow">FOCUSED TODAY</span><strong>{formatSeconds(totals.actual_seconds)}</strong><p>Actual tracked time</p></div>
