@@ -37,7 +37,7 @@ def seconds_between(start: datetime, end: datetime) -> int:
 
 
 def canonical_label(value: str | None) -> tuple[str, str]:
-    label = re.sub(r"\\s+", " ", (value or "Unlinked").strip())
+    label = re.sub(r"\s+", " ", (value or "Unlinked").strip())
     return label, label.casefold()
 
 
