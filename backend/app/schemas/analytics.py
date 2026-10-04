@@ -9,6 +9,7 @@ class AnalyticsTotals(BaseModel):
     completed_items: int
     skipped_items: int
     schedule_completion_rate: float
+    time_execution_rate: float
     session_count: int
     activity_count: int
     diary_days: int
@@ -42,6 +43,15 @@ class TargetProgress(BaseModel):
     status: str
 
 
+class ReflectionSummary(BaseModel):
+    days_with_entries: int
+    days_with_accomplishments: int
+    days_with_learning: int
+    days_with_tomorrow_changes: int
+    days_with_distractions: int
+    coverage_percent: float
+
+
 class AnalyticsSummary(BaseModel):
     start_date: date
     end_date: date
@@ -49,3 +59,5 @@ class AnalyticsSummary(BaseModel):
     daily: list[AnalyticsDay]
     target_progress: list[TargetProgress]
     breakdown: list[ActivityBreakdown]
+    reflection: ReflectionSummary
+    insights: list[str]
