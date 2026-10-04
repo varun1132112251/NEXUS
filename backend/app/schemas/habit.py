@@ -1,7 +1,9 @@
-from datetime import datetime
+from datetime import datetime, date
 from uuid import UUID
+
 from pydantic import BaseModel, ConfigDict, Field
 from app.schemas.target import MetricType
+
 
 class HabitCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
@@ -10,6 +12,7 @@ class HabitCreate(BaseModel):
     frequency: str = Field(default="daily", min_length=1, max_length=32)
     metric_type: MetricType = "count"
 
+
 class HabitUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     description: str | None = None
@@ -17,6 +20,7 @@ class HabitUpdate(BaseModel):
     frequency: str | None = Field(default=None, min_length=1, max_length=32)
     metric_type: MetricType | None = None
     active: bool | None = None
+
 
 class HabitRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -30,3 +34,15 @@ class HabitRead(BaseModel):
     active: bool
     created_at: datetime
     updated_at: datetime
+
+
+class HabitStatsRead(BaseModel):
+    habit_id: UUID
+    expected_count: int
+    completed_count: int
+    consistency_percent: float
+    current_streak: int
+    best_streak: int
+    focused_seconds: int
+    completed_days: int
+    last_completed_date: date | None
