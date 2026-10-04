@@ -224,6 +224,14 @@ function Dashboard({ token, onLogout }) {
     await load();
   }
 
+  async function deleteTarget(target) {
+    if (!window.confirm(`Delete target "${target.title}"?`)) return;
+    try {
+      await api("/targets/" + target.id, { method: "DELETE" }, token);
+      await load();
+    } catch (err) { setError(err.message); }
+  }
+
   async function updateTarget(targetId, patch) {
     try {
       await api("/targets/" + targetId, { method: "PATCH", body: JSON.stringify(patch) }, token);
@@ -282,7 +290,7 @@ function Dashboard({ token, onLogout }) {
 
   const actualRunning = data.current ? Math.max(0, Math.floor((now - new Date(data.current.started_at).getTime()) / 1000)) : 0;
   const totals = data.analytics?.totals || {};
-  const targets = data.analytics?.target_progress || data.targets.map(t => ({
+  const targets = data.targets.map(t => ({
     ...t, progress_percent: t.target_value ? Math.min(100, t.current_value / t.target_value * 100) : 0
   }));
   const greeting = useMemo(() => {
@@ -312,7 +320,7 @@ function Dashboard({ token, onLogout }) {
       {view === "Overview" && <Overview data={data} targets={targets} actualRunning={actualRunning} timerTitle={timerTitle} setTimerTitle={setTimerTitle} startTimer={startTimer} stopTimer={stopTimer} activityForm={activityForm} setActivityForm={setActivityForm} markSchedule={markSchedule} onTargetChange={updateScheduleTarget} totals={totals} />}
       {view === "Routine" && <RoutineView date={scheduleDate} routines={data.routines} habits={data.habits} targets={data.targets} onCreate={createRoutine} onGenerate={generateRoutine} />}\n      {view === "Schedule" && <ScheduleView date={scheduleDate} schedule={data.schedule} targets={data.targets} onDateChange={async (next) => { setScheduleDate(next); await loadScheduleFor(next); }} onCreate={createSchedule} onUpdate={markSchedule} onTargetChange={updateScheduleTarget} onStart={startSchedule} />}
       {view === "Habits" && <HabitsView habits={data.habits} onCreate={createHabit} />}
-      {view === "Targets" && <TargetsView targets={targets} onCreate={createTarget} onUpdate={updateTarget} />}
+      {view === "Targets" && <TargetsView targets={targets} onCreate={createTarget} onUpdate={updateTarget} onDelete={deleteTarget} />}
       {view === "History" && <HistoryView history={data.history} activities={data.activities} targets={data.targets} habits={data.habits} onReview={saveActivity} />}
       {view === "Analytics" && <AnalyticsView token={token} />}
       {view === "Diary" && <DiaryView date={date} existing={data.diary[0]} onSave={createDiary} />}
@@ -496,17 +504,50 @@ function HabitsView({ habits, onCreate }) {
   return <section className="two-col"><div className="panel"><PanelTitle eyebrow="ROUTINE" title="Create habit" /><form className="form-grid" onSubmit={submit}><label>Name<input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} required /></label><label>Description<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label><label>Category<input value={form.category} onChange={e=>setForm({...form,category:e.target.value})}/></label><label>Frequency<select value={form.frequency} onChange={e=>setForm({...form,frequency:e.target.value})}><option>daily</option><option>weekly</option><option>custom</option></select></label><label>Activity metric<select value={form.metric_type} onChange={e=>setForm({...form,metric_type:e.target.value})}>{METRIC_OPTIONS.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label><button className="primary">Create habit</button></form></div><div className="panel"><PanelTitle eyebrow="ACTIVE" title="Your habits" />{habits.length ? <div className="item-list">{habits.map(h=><div className="list-item" key={h.id}><div><strong>{h.name}</strong><span>{h.category} · {h.frequency} · {METRIC_LABELS[h.metric_type] || "Generic count"}</span></div><b>{h.active ? "ACTIVE" : "OFF"}</b></div>)}</div> : <Empty text="No habits yet." />}</div></section>;
 }
 
-function TargetsView({ targets, onCreate, onUpdate }) {
+function TargetsView({ targets, onCreate, onUpdate, onDelete }) {
   const [form, setForm] = useState({ title:"", description:"", metric_type:"auto", target_value:"" });
-  const submit = async e => { e.preventDefault(); await onCreate({ ...form, metric_type: form.metric_type === "auto" ? inferMetricType(form.title) : form.metric_type }); setForm({ title:"", description:"", metric_type:"auto", target_value:"" }); };
+  const submit = async e => {
+    e.preventDefault();
+    await onCreate({ ...form, metric_type: form.metric_type === "auto" ? inferMetricType(form.title) : form.metric_type });
+    setForm({ title:"", description:"", metric_type:"auto", target_value:"" });
+  };
   const selectedMetric = form.metric_type === "auto" ? inferMetricType(form.title) : form.metric_type;
-  return <section className="two-col"><div className="panel"><PanelTitle eyebrow="MONTHLY COMMITMENT" title="Add October target" /><form className="form-grid" onSubmit={submit}>
-    <label>Target<input value={form.title} onChange={e=>setForm({...form,title:e.target.value})} placeholder="e.g. Solve 150 DSA problems" required /></label>
+  return <section className="two-col">
+    <div className="panel">
+      <PanelTitle eyebrow="MONTHLY COMMITMENT" title="Add October target" />
+      <form className="form-grid" onSubmit={submit}>
+        <label>Target<input value={form.title} onChange={e=>setForm({...form,title:e.target.value})} placeholder="e.g. Solve 150 DSA problems" required /></label>
+        <label>Description<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label>
+        <label>Progress metric<select value={selectedMetric} onChange={e=>setForm({...form,metric_type:e.target.value})}>{METRIC_OPTIONS.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>
+        <label>Target value<input type="number" min="0" value={form.target_value} onChange={e=>setForm({...form,target_value:e.target.value})} required /></label>
+        <button className="primary">Create target</button>
+      </form>
+    </div>
+    <div className="panel">
+      <PanelTitle eyebrow="OCTOBER" title="Targets" />
+      {targets.length ? targets.map(t=><TargetEditor key={t.id} target={t} onUpdate={onUpdate} onDelete={onDelete} />) : <Empty text="No monthly targets yet." />}
+    </div>
+  </section>;
+}
+
+function TargetEditor({ target, onUpdate, onDelete }) {
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({ title:target.title, description:target.description||"", metric_type:target.metric_type||"count", target_value:target.target_value??0 });
+  const save = async () => { await onUpdate(target.id, { title:form.title, description:form.description||null, metric_type:form.metric_type, target_value:Number(form.target_value) }); setEditing(false); };
+  if (editing) return <div className="target-editor">
+    <label>Title<input value={form.title} onChange={e=>setForm({...form,title:e.target.value})}/></label>
     <label>Description<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label>
-    <label>Progress metric<select value={selectedMetric} onChange={e=>setForm({...form,metric_type:e.target.value})}>{METRIC_OPTIONS.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>
-    <label>Target value<input type="number" min="0" value={form.target_value} onChange={e=>setForm({...form,target_value:e.target.value})} required /></label>
-    <button className="primary">Create target</button>
-  </form></div><div className="panel"><PanelTitle eyebrow="OCTOBER" title="Targets" />{targets.length ? targets.map(t=><div key={t.id}><TargetCard t={t}/><label className="target-metric-editor">Progress metric<select value={t.metric_type || "count"} onChange={e=>onUpdate(t.id,{metric_type:e.target.value})}>{METRIC_OPTIONS.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label></div>) : <Empty text="No monthly targets yet." />}</div></section>;
+    <label>Progress metric<select value={form.metric_type} onChange={e=>setForm({...form,metric_type:e.target.value})}>{METRIC_OPTIONS.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>
+    <label>Target value<input type="number" min="0" value={form.target_value} onChange={e=>setForm({...form,target_value:e.target.value})}/></label>
+    <div className="row-actions"><button className="primary" onClick={save}>Save</button><button onClick={()=>setEditing(false)}>Cancel</button><button className="danger-text" onClick={()=>onDelete(target)}>Delete</button></div>
+  </div>;
+  return <div className="target-card-row">
+    <TargetCard t={target}/>
+    <div className="row-actions">
+      <button onClick={()=>setEditing(true)}>Edit</button>
+      <button className="danger-text" onClick={()=>onDelete(target)}>Delete</button>
+    </div>
+  </div>;
 }
 
 function HistoryView({ history, activities, targets, habits, onReview }) {
