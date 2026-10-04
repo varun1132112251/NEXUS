@@ -45,7 +45,7 @@ def create(payload: RoutineTemplateCreate, db: Session = Depends(get_db), user: 
 
 @router.get("", response_model=list[RoutineTemplateRead])
 def list_routines(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    query = select(RoutineTemplate).where(RoutineTemplate.user_id == user.id, RoutineTemplate.active.is_(True)).order_by(RoutineTemplate.weekday, RoutineTemplate.start_time)
+    query = select(RoutineTemplate).where(RoutineTemplate.user_id == user.id, RoutineTemplate.active.is_(True)).order_by(RoutineTemplate.start_time)
     return list(db.scalars(query).all())
 
 
@@ -74,10 +74,10 @@ def generate(target_date: date, db: Session = Depends(get_db), user: User = Depe
     templates = list(db.scalars(
         select(RoutineTemplate).where(
             RoutineTemplate.user_id == user.id,
-            RoutineTemplate.weekday == weekday,
             RoutineTemplate.active.is_(True),
         ).order_by(RoutineTemplate.start_time)
     ).all())
+    templates = [template for template in templates if weekday in template.weekdays]
 
     existing = list(db.scalars(
         select(ScheduleItem).where(
