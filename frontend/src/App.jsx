@@ -122,7 +122,8 @@ function Dashboard({ token, onLogout }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [timerTitle, setTimerTitle] = useState("");
-  const [activityForm, setActivityForm] = useState({ metric_value: "", topic: "", book: "", chapter: "", practice_type: "", workstream: "", milestone: "", accuracy: "", attempted: "", mistakes: "", words_learned: "", key_concepts: "", subject: "", difficulty: "" });
+  const emptyActivityForm = { metric_value: "", topic: "", pattern: "", book: "", chapter: "", practice_type: "", workstream: "", milestone: "", accuracy: "", attempted: "", mistakes: "", words_learned: "", key_concepts: "", subject: "", difficulty: "", notes: "" };
+  const [activityForm, setActivityForm] = useState(emptyActivityForm);
   const [now, setNow] = useState(Date.now());
   const [scheduleDate, setScheduleDate] = useState(localDate());
 
@@ -188,7 +189,7 @@ function Dashboard({ token, onLogout }) {
     if (!data.current) return;
     try {
       await api("/time-sessions/" + data.current.id + "/stop", { method: "POST" }, token);
-      setActivityForm({ metric_value: "", topic: "", book: "", chapter: "", practice_type: "", workstream: "", milestone: "", accuracy: "", attempted: "", mistakes: "", words_learned: "", key_concepts: "", subject: "", difficulty: "" });
+      setActivityForm(emptyActivityForm);
       await load();
       setView("History");
     } catch (err) { setError(err.message); }
@@ -197,9 +198,9 @@ function Dashboard({ token, onLogout }) {
   async function saveActivity(session, form, metricType) {
     const value = Number(form.metric_value);
     if (!Number.isFinite(value) || value < 0) throw new Error("Enter a valid measured value.");
-    const details = { duration_seconds: session.duration_seconds, ...Object.fromEntries(Object.entries(form).filter(([key, val]) => key !== "metric_value" && val !== "")) };
+    const details = { metric_type: metricType, duration_seconds: session.duration_seconds, ...Object.fromEntries(Object.entries(form).filter(([key, val]) => key !== "metric_value" && key !== "notes" && val !== "")) };
     details[metricKey(metricType)] = value;
-    await api("/activity-records", { method: "POST", body: JSON.stringify({ activity_type: metricType, title: session.title, details, notes: "Activity review recorded by NEXUS.", time_session_id: session.id, task_id: session.task_id, habit_id: session.habit_id, project_id: session.project_id, target_id: session.target_id, metric_value: value }) }, token);
+    await api("/activity-records", { method: "POST", body: JSON.stringify({ activity_type: "execution", metric_type: metricType, title: session.title, details, notes: form.notes || null, time_session_id: session.id, task_id: session.task_id, habit_id: session.habit_id, project_id: session.project_id, target_id: session.target_id, metric_value: value }) }, token);
     await load();
   }
 
@@ -378,6 +379,7 @@ function MetricCapture({ target, form, setForm }) {
     <label>{valueLabels[target.metric_type] || "Measured value"}<input type="number" min="0" value={form.metric_value} onChange={e => update("metric_value", e.target.value)} required /></label>
     {target.metric_type === "problems_solved" && <div className="capture-grid">
       <label>Topic<input value={form.topic} onChange={e=>update("topic",e.target.value)} /></label>
+      <label>Pattern<input value={form.pattern} onChange={e=>update("pattern",e.target.value)} placeholder="Sliding window, hashing…" /></label>
       <label>Attempted<input type="number" min="0" value={form.attempted} onChange={e=>update("attempted",e.target.value)} /></label>
       <label>Mistakes<input type="number" min="0" value={form.mistakes} onChange={e=>update("mistakes",e.target.value)} /></label>
       <label>Difficulty<input value={form.difficulty} onChange={e=>update("difficulty",e.target.value)} placeholder="Easy / Medium / Hard" /></label>
@@ -391,7 +393,8 @@ function MetricCapture({ target, form, setForm }) {
       <label>Practice type<input value={form.practice_type} onChange={e=>update("practice_type",e.target.value)} placeholder="Speaking / writing / pronunciation" /></label>
       <label>Topic<input value={form.topic} onChange={e=>update("topic",e.target.value)} /></label>
       <label>Words learned<input type="number" min="0" value={form.words_learned} onChange={e=>update("words_learned",e.target.value)} /></label>
-    </div>}
+      <label>Accuracy %<input type="number" min="0" max="100" value={form.accuracy} onChange={e=>update("accuracy",e.target.value)} /></label>
+    </div>
     {target.metric_type === "questions_solved" && <div className="capture-grid">
       <label>Subject<input value={form.subject} onChange={e=>update("subject",e.target.value)} /></label>
       <label>Topic<input value={form.topic} onChange={e=>update("topic",e.target.value)} /></label>
@@ -411,6 +414,8 @@ function MetricCapture({ target, form, setForm }) {
       <label>Book<input value={form.book} onChange={e=>update("book",e.target.value)} /></label>
       <label>Key concepts<textarea value={form.key_concepts} onChange={e=>update("key_concepts",e.target.value)} /></label>
     </div>}
+    {target.metric_type === "count" && <label>What did you accomplish?<textarea value={form.key_concepts} onChange={e=>update("key_concepts",e.target.value)} placeholder="Brief evidence of the work completed." /></label>}
+    <label>Notes<textarea value={form.notes} onChange={e=>update("notes",e.target.value)} placeholder="Mistakes, decisions, next action, or anything worth remembering." /></label>
   </div>;
 }
 
