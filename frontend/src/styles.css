@@ -20,3 +20,9 @@ nav button{border:0;background:transparent;text-align:left;width:100%;padding:11
 .day-option{display:flex;align-items:center;justify-content:center;gap:6px;min-width:58px;padding:9px 10px;border:1px solid #29313d;border-radius:9px;background:#080b10;color:#929baa;text-transform:none;letter-spacing:0;cursor:pointer}
 .day-option:has(input:checked){border-color:#d7ff48;color:#d7ff48;background:#12180b}
 .day-option input{width:auto;margin:0;accent-color:#d7ff48}
+
+.routine-days{display:flex;flex-wrap:wrap;gap:4px;align-items:center;max-width:210px}
+.routine-day{display:inline-flex;align-items:center;justify-content:center;min-width:28px;padding:4px 6px;border:1px solid #29313d;border-radius:6px;font-size:9px;line-height:1;color:#929baa;background:#080b10}
+.routine-day.active{border-color:#d7ff48;color:#d7ff48;background:#12180b}
+.routine-row{display:grid;grid-template-columns:220px minmax(0,1fr) auto;gap:14px;align-items:center}
+@media(max-width:800px){.routine-row{grid-template-columns:1fr}.routine-days{max-width:none}}
