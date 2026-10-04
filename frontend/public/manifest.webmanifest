@@ -1,0 +1,11 @@
+{
+  "name": "NEXUS — Personal Operating System",
+  "short_name": "NEXUS",
+  "description": "Plan. Execute. Track. Reflect. Improve.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#05070c",
+  "theme_color": "#05070c",
+  "orientation": "portrait-primary"
+}
