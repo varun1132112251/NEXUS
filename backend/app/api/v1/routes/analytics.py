@@ -135,16 +135,17 @@ def summary(
 
     breakdown_map = defaultdict(lambda: {"label": "", "seconds": 0, "session_count": 0, "activity_count": 0, "metric_total": 0})
     for session in sessions:
-        key = session.habit_id or session.project_id or session.task_id or session.target_id or "unlinked"
-        key = str(key)
+        label = (session.title or "Unlinked").strip()
+        key = label.casefold() or "unlinked"
         bucket = breakdown_map[key]
-        bucket["label"] = session.title
+        bucket["label"] = bucket["label"] or label
         bucket["seconds"] += session.duration_seconds or 0
         bucket["session_count"] += 1
     for activity in activities:
-        key = str(activity.habit_id or activity.project_id or activity.task_id or activity.target_id or "unlinked")
+        label = (activity.title or "Unlinked").strip()
+        key = label.casefold() or "unlinked"
         bucket = breakdown_map[key]
-        bucket["label"] = activity.title or bucket["label"] or key
+        bucket["label"] = bucket["label"] or label
         bucket["activity_count"] += 1
         bucket["metric_total"] += activity.metric_value or 0
 
