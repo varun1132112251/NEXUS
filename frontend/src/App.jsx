@@ -427,10 +427,53 @@ function RoutineView({ date, routines, habits, targets, onCreate, onGenerate }) 
       </form>
     </div>
     <div className="panel"><PanelTitle eyebrow="YOUR ROUTINE" title="Recurring blocks" />
-      {routines.length ? <div className="schedule-list">{routines.map(r=><div className="schedule-row" key={r.id}><div className="time">{days[r.weekday]}<small>{r.start_time.slice(0,5)}–{r.end_time.slice(0,5)}</small></div><div className="schedule-info"><strong>{r.title}</strong><span>{r.habit_id ? "Habit linked" : "Routine block"}{r.target_id ? " · Target linked" : ""}</span></div></div>)}</div> : <Empty text="No core routine blocks yet." />}
+      {routines.length ? <div className="schedule-list">{routines.map(r=><RoutineRow key={r.id} routine={r} days={days} habits={habits} targets={targets} />)}</div> : <Empty text="No core routine blocks yet." />}
       <button className="primary full" onClick={()=>onGenerate(date)}>Generate {date} from routine</button>
     </div>
   </section>;
+}
+
+function RoutineRow({ routine, days, habits, targets }) {
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({
+    title: routine.title,
+    notes: routine.notes || "",
+    weekday: routine.weekday,
+    start_time: routine.start_time.slice(0,5),
+    end_time: routine.end_time.slice(0,5),
+    habit_id: routine.habit_id || "",
+    target_id: routine.target_id || "",
+    priority: routine.priority,
+  });
+  const update = async () => {
+    const token = localStorage.getItem("nexus_token");
+    const payload = { ...form, weekday: Number(form.weekday), priority: Number(form.priority), habit_id: form.habit_id || null, target_id: form.target_id || null };
+    const response = await fetch(API + "/routines/" + routine.id, { method:"PATCH", headers:{ "Content-Type":"application/json", Authorization:"Bearer " + token }, body:JSON.stringify(payload) });
+    if (!response.ok) throw new Error("Failed to update routine.");
+    window.location.reload();
+  };
+  const remove = async () => {
+    if (!window.confirm("Delete this recurring routine block?")) return;
+    const token = localStorage.getItem("nexus_token");
+    const response = await fetch(API + "/routines/" + routine.id, { method:"DELETE", headers:{ Authorization:"Bearer " + token } });
+    if (!response.ok) throw new Error("Failed to delete routine.");
+    window.location.reload();
+  };
+  if (editing) return <div className="panel routine-edit-row">
+    <div className="form-grid">
+      <label>Title<input value={form.title} onChange={e=>setForm({...form,title:e.target.value})}/></label>
+      <label>Day<select value={form.weekday} onChange={e=>setForm({...form,weekday:e.target.value})}>{days.map((d,i)=><option key={i} value={i}>{d}</option>)}</select></label>
+      <div className="inline-fields"><label>Start<input type="time" value={form.start_time} onChange={e=>setForm({...form,start_time:e.target.value})}/></label><label>End<input type="time" value={form.end_time} onChange={e=>setForm({...form,end_time:e.target.value})}/></label></div>
+      <label>Habit<select value={form.habit_id} onChange={e=>setForm({...form,habit_id:e.target.value})}><option value="">No habit</option>{habits.map(h=><option key={h.id} value={h.id}>{h.name}</option>)}</select></label>
+      <label>Target<select value={form.target_id} onChange={e=>setForm({...form,target_id:e.target.value})}><option value="">No target</option>{targets.map(t=><option key={t.id} value={t.id}>{t.title}</option>)}</select></label>
+      <div className="row-actions"><button onClick={update}>Save</button><button onClick={()=>setEditing(false)}>Cancel</button><button className="danger-text" onClick={remove}>Delete</button></div>
+    </div>
+  </div>;
+  return <div className="schedule-row">
+    <div className="time">{days[routine.weekday]}<small>{routine.start_time.slice(0,5)}–{routine.end_time.slice(0,5)}</small></div>
+    <div className="schedule-info"><strong>{routine.title}</strong><span>{routine.habit_id ? "Habit linked" : "Routine block"}{routine.target_id ? " · Target linked" : ""}</span></div>
+    <div className="row-actions"><button onClick={()=>setEditing(true)}>Edit</button><button className="danger-text" onClick={remove}>Delete</button></div>
+  </div>;
 }
 
 function ScheduleView({ date, schedule, targets, onDateChange, onCreate, onUpdate, onTargetChange, onStart }) {
