@@ -57,4 +57,4 @@ def test_best_calendar_streak_finds_longest_chain() -> None:
 def test_scheduled_streak_uses_expected_occurrences() -> None:
     expected = {date(2026, 10, 1), date(2026, 10, 3), date(2026, 10, 5)}
     completed = {date(2026, 10, 1), date(2026, 10, 3), date(2026, 10, 5)}
-    assert scheduled_streak(expected, completed, date(2026, 10, 5)) == 2
+    assert scheduled_streak(expected, completed, date(2026, 10, 5)) == 3
