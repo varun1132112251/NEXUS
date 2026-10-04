@@ -16,10 +16,32 @@ def owned_target(db: Session, target_id: UUID, user_id: UUID) -> Target:
     if target is None: raise HTTPException(status_code=404, detail="Target not found.")
     return target
 
+
+def inferred_metric_type(title: str) -> str:
+    text = title.lower()
+    if "dsa" in text or "problem" in text:
+        return "problems_solved"
+    if "book" in text and ("read" in text or "reading" in text):
+        return "books_completed"
+    if "english" in text and "session" in text:
+        return "sessions_completed"
+    if "gate" in text and ("revision" in text or "question" in text):
+        return "questions_solved"
+    if "nexus" in text and ("complete" in text or "v1" in text):
+        return "milestones_completed"
+    return "count"
+
+
 @router.post("", response_model=TargetRead, status_code=status.HTTP_201_CREATED)
 def create_target(payload: TargetCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> Target:
-    target = Target(user_id=user.id, **payload.model_dump())
-    db.add(target); db.commit(); db.refresh(target); return target
+    data = payload.model_dump()
+    if data["metric_type"] == "count":
+        data["metric_type"] = inferred_metric_type(data["title"])
+    target = Target(user_id=user.id, **data)
+    db.add(target)
+    db.commit()
+    db.refresh(target)
+    return target
 
 @router.get("", response_model=list[TargetRead])
 def list_targets(
