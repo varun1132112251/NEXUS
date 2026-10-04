@@ -1,4 +1,4 @@
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -85,13 +85,13 @@ def generate(target_date: date, db: Session = Depends(get_db), user: User = Depe
             ScheduleItem.scheduled_date == target_date,
         )
     ).all())
-    existing_keys = {(x.title, x.start_at.time(), x.end_at.time()) for x in existing}
+    existing_keys = {(x.title, x.start_at.time(), x.end_at.time(), x.habit_id, x.target_id) for x in existing}
 
     created = 0
     for template in templates:
         start_at = datetime.combine(target_date, template.start_time)
         end_at = datetime.combine(target_date, template.end_time)
-        key = (template.title, template.start_time, template.end_time)
+        key = (template.title, template.start_time, template.end_time, template.habit_id, template.target_id)
         if key in existing_keys:
             continue
         db.add(ScheduleItem(
