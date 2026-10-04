@@ -38,3 +38,23 @@ def test_activity_rejects_metric_mismatch() -> None:
 
 def test_generic_execution_accepts_count_metric() -> None:
     validate_details("count", {"count": 1, "key_concepts": "Implemented API"}, 1)
+
+
+from datetime import date
+from app.api.v1.routes.habits import best_calendar_streak, consecutive_streak, scheduled_streak
+
+
+def test_consecutive_streak_counts_latest_chain() -> None:
+    days = {date(2026, 10, 1), date(2026, 10, 2), date(2026, 10, 4)}
+    assert consecutive_streak(days, date(2026, 10, 4)) == 1
+
+
+def test_best_calendar_streak_finds_longest_chain() -> None:
+    days = {date(2026, 10, 1), date(2026, 10, 2), date(2026, 10, 3), date(2026, 10, 6)}
+    assert best_calendar_streak(days) == 3
+
+
+def test_scheduled_streak_uses_expected_occurrences() -> None:
+    expected = {date(2026, 10, 1), date(2026, 10, 3), date(2026, 10, 5)}
+    completed = {date(2026, 10, 1), date(2026, 10, 3), date(2026, 10, 5)}
+    assert scheduled_streak(expected, completed, date(2026, 10, 5)) == 2
