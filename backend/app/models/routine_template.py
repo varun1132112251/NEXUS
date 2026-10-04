@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, time
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, Time, Uuid, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, Time, Uuid, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -23,7 +23,7 @@ class RoutineTemplate(Base):
 
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    weekday: Mapped[int] = mapped_column(Integer, nullable=False)
+    weekdays: Mapped[list] = mapped_column(JSON, nullable=False, default=list, server_default=text("'[]'::json"))
     start_time: Mapped[time] = mapped_column(Time, nullable=False)
     end_time: Mapped[time] = mapped_column(Time, nullable=False)
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=3, server_default="3")
