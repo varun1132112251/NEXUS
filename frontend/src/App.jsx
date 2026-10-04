@@ -118,7 +118,7 @@ function App() {
 
 function Dashboard({ token, onLogout }) {
   const [view, setView] = useState("Overview");
-  const [data, setData] = useState({ analytics: null, schedule: [], current: null, targets: [], habits: [], history: [], activities: [], routines: [], diary: [] });
+  const [data, setData] = useState({ analytics: null, schedule: [], current: null, targets: [], habits: [], habitStats: [], history: [], activities: [], routines: [], diary: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [timerTitle, setTimerTitle] = useState("");
@@ -139,12 +139,13 @@ function Dashboard({ token, onLogout }) {
         api("/time-sessions/current", {}, token),
         api(`/targets?month=${month}`, {}, token),
         api("/habits", {}, token),
+        api(`/habits/stats?start_date=${date}&end_date=${date}`, {}, token),
         api("/time-sessions", {}, token),
         api("/activity-records", {}, token),
         api("/routines", {}, token),
         api(`/diary?entry_date=${date}`, {}, token),
       ]);
-      setData({ analytics, schedule, current, targets, habits, history, activities, routines, diary });
+      setData({ analytics, schedule, current, targets, habits, habitStats, history, activities, routines, diary });
       if (current) setTimerTitle(current.title);
     } catch (err) {
       setError(err.message);
@@ -320,7 +321,7 @@ function Dashboard({ token, onLogout }) {
 
       {view === "Overview" && <Overview data={data} targets={targets} actualRunning={actualRunning} timerTitle={timerTitle} setTimerTitle={setTimerTitle} startTimer={startTimer} stopTimer={stopTimer} activityForm={activityForm} setActivityForm={setActivityForm} markSchedule={markSchedule} onTargetChange={updateScheduleTarget} totals={totals} />}
       {view === "Routine" && <RoutineView date={scheduleDate} routines={data.routines} habits={data.habits} targets={data.targets} onCreate={createRoutine} onGenerate={generateRoutine} />}\n      {view === "Schedule" && <ScheduleView date={scheduleDate} schedule={data.schedule} targets={data.targets} onDateChange={async (next) => { setScheduleDate(next); await loadScheduleFor(next); }} onCreate={createSchedule} onUpdate={markSchedule} onTargetChange={updateScheduleTarget} onStart={startSchedule} />}
-      {view === "Habits" && <HabitsView habits={data.habits} onCreate={createHabit} />}
+      {view === "Habits" && <HabitsView habits={data.habits} habitStats={data.habitStats} onCreate={createHabit} />}
       {view === "Targets" && <TargetsView targets={targets} onCreate={createTarget} onUpdate={updateTarget} onDelete={deleteTarget} />}
       {view === "History" && <HistoryView history={data.history} activities={data.activities} targets={data.targets} habits={data.habits} onReview={saveActivity} />}
       {view === "Analytics" && <AnalyticsView token={token} />}
@@ -503,10 +504,10 @@ function ScheduleView({ date, schedule, targets, onDateChange, onCreate, onUpdat
   </form></div><div className="panel"><div className="panel-head"><div><span className="eyebrow">{date}</span><h3>{date === localDate() ? "Today’s plan" : "Planned execution"}</h3><p className="muted small">{dateLabel}</p></div><div className="date-nav"><button className="ghost small-btn" type="button" onClick={() => shiftDate(-1)}>←</button><button className="ghost small-btn" type="button" onClick={() => shiftDate(1)}>→</button></div></div><div className="schedule-list">{schedule.length ? schedule.map(item => <div className={`schedule-row ${item.status}`} key={item.id}><div className="time">{formatClock(item.start_at)}<small>{formatClock(item.end_at)}</small></div><div className="schedule-info"><strong>{item.title}</strong><span>{item.notes || "Focus block"}{item.target_id && " · Target linked"}{item.status === "partial" && " · Partial"}</span></div><div className="row-actions">{(item.status === "planned" || item.status === "partial") && <><button onClick={() => onStart(item)}>Start</button><button onClick={() => onUpdate(item,"completed")}>Done</button>{item.status === "planned" && <button onClick={() => onUpdate(item,"skipped")}>Skip</button>}</>}</div></div>) : <Empty text="No blocks planned." />}</div></div></section>;
 }
 
-function HabitsView({ habits, onCreate }) {
+function HabitsView({ habits, habitStats, onCreate }) {
   const [form, setForm] = useState({ name:"", description:"", category:"study", frequency:"daily", metric_type:"count" });
   const submit = async e => { e.preventDefault(); await onCreate(form); setForm({ name:"", description:"", category:"study", frequency:"daily", metric_type:"count" }); };
-  return <section className="two-col"><div className="panel"><PanelTitle eyebrow="ROUTINE" title="Create habit" /><form className="form-grid" onSubmit={submit}><label>Name<input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} required /></label><label>Description<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label><label>Category<input value={form.category} onChange={e=>setForm({...form,category:e.target.value})}/></label><label>Frequency<select value={form.frequency} onChange={e=>setForm({...form,frequency:e.target.value})}><option>daily</option><option>weekly</option><option>custom</option></select></label><label>Activity metric<select value={form.metric_type} onChange={e=>setForm({...form,metric_type:e.target.value})}>{METRIC_OPTIONS.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label><button className="primary">Create habit</button></form></div><div className="panel"><PanelTitle eyebrow="ACTIVE" title="Your habits" />{habits.length ? <div className="item-list">{habits.map(h=><div className="list-item" key={h.id}><div><strong>{h.name}</strong><span>{h.category} · {h.frequency} · {METRIC_LABELS[h.metric_type] || "Generic count"}</span></div><b>{h.active ? "ACTIVE" : "OFF"}</b></div>)}</div> : <Empty text="No habits yet." />}</div></section>;
+  return <section className="two-col"><div className="panel"><PanelTitle eyebrow="ROUTINE" title="Create habit" /><form className="form-grid" onSubmit={submit}><label>Name<input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} required /></label><label>Description<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label><label>Category<input value={form.category} onChange={e=>setForm({...form,category:e.target.value})}/></label><label>Frequency<select value={form.frequency} onChange={e=>setForm({...form,frequency:e.target.value})}><option>daily</option><option>weekly</option><option>custom</option></select></label><label>Activity metric<select value={form.metric_type} onChange={e=>setForm({...form,metric_type:e.target.value})}>{METRIC_OPTIONS.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label><button className="primary">Create habit</button></form></div><div className="panel"><PanelTitle eyebrow="ACTIVE" title="Your habits" />{habits.length ? <div className="item-list">{habits.map(h=>{ const s=habitStats.find(x=>x.habit_id===h.id); return <div className="list-item" key={h.id}><div><strong>{h.name}</strong><span>{h.category} · {h.frequency} · {METRIC_LABELS[h.metric_type] || "Generic count"}</span>{s && <span>{s.completed_count}/{s.expected_count} days · {s.consistency_percent}% consistency · {s.current_streak} day streak · {formatSeconds(s.focused_seconds)}</span>}</div><b>{h.active ? "ACTIVE" : "OFF"}</b></div>;})}</div> : <Empty text="No habits yet." />}</div></section>;
 }
 
 function TargetsView({ targets, onCreate, onUpdate, onDelete }) {
