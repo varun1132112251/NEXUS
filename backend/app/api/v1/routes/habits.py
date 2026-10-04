@@ -47,34 +47,19 @@ def consecutive_streak(days: set[date], anchor: date | None = None) -> int:
 
 
 def scheduled_streak(days: set[date], completed: set[date], anchor: date) -> int:
-    if not days or not completed:
-        return 0
     ordered = sorted(day for day in days if day <= anchor)
     if not ordered:
         return 0
-    cursor = ordered[-1]
-    if cursor not in completed:
-        previous = [day for day in ordered if day < cursor and day in completed]
-        if not previous:
-            return 0
-        cursor = previous[-1]
+    index = len(ordered) - 1
+    while index >= 0 and ordered[index] not in completed:
+        index -= 1
+    if index < 0:
+        return 0
     streak = 0
-    previous = None
-    for day in reversed(ordered):
-        if day > cursor:
-            continue
-        if day not in completed:
-            if previous is not None:
-                break
-            continue
-        if previous is not None and (previous - day).days != 1:
-            break
+    while index >= 0 and ordered[index] in completed:
         streak += 1
-        previous = day
-        if day == cursor:
-            break
+        index -= 1
     return streak
-
 
 def best_calendar_streak(days: set[date]) -> int:
     best = current = 0
@@ -87,7 +72,6 @@ def best_calendar_streak(days: set[date]) -> int:
         best = max(best, current)
         previous = day
     return best
-
 
 def expected_days(habit: Habit, start: date, end: date, scheduled: set[date]) -> set[date]:
     if scheduled:
