@@ -455,9 +455,9 @@ function HabitsView({ habits, onCreate }) {
 }
 
 function TargetsView({ targets, onCreate, onUpdate }) {
-  const [form, setForm] = useState({ title:"", description:"", metric_type:"count", target_value:"" });
-  const submit = async e => { e.preventDefault(); await onCreate({ ...form, metric_type: inferMetricType(form.title) !== "count" ? inferMetricType(form.title) : form.metric_type }); setForm({ title:"", description:"", metric_type:"count", target_value:"" }); };
-  const selectedMetric = inferMetricType(form.title) !== "count" ? inferMetricType(form.title) : form.metric_type;
+  const [form, setForm] = useState({ title:"", description:"", metric_type:"auto", target_value:"" });
+  const submit = async e => { e.preventDefault(); await onCreate({ ...form, metric_type: form.metric_type === "auto" ? inferMetricType(form.title) : form.metric_type }); setForm({ title:"", description:"", metric_type:"auto", target_value:"" }); };
+  const selectedMetric = form.metric_type === "auto" ? inferMetricType(form.title) : form.metric_type;
   return <section className="two-col"><div className="panel"><PanelTitle eyebrow="MONTHLY COMMITMENT" title="Add October target" /><form className="form-grid" onSubmit={submit}>
     <label>Target<input value={form.title} onChange={e=>setForm({...form,title:e.target.value})} placeholder="e.g. Solve 150 DSA problems" required /></label>
     <label>Description<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label>
