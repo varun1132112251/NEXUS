@@ -23,6 +23,15 @@ class AnalyticsDay(BaseModel):
     activity_count: int
 
 
+class ActivityBreakdown(BaseModel):
+    key: str
+    label: str
+    seconds: int
+    session_count: int
+    activity_count: int
+    metric_total: int
+
+
 class TargetProgress(BaseModel):
     id: str
     title: str
@@ -39,3 +48,4 @@ class AnalyticsSummary(BaseModel):
     totals: AnalyticsTotals
     daily: list[AnalyticsDay]
     target_progress: list[TargetProgress]
+    breakdown: list[ActivityBreakdown]
