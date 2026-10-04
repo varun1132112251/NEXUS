@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 
-const API = "http://127.0.0.1:8000/api/v1";
+const API = `${import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"}/api/v1`;
 
 const fmt = (seconds = 0) => {
   const h = Math.floor(seconds / 3600);
