@@ -45,7 +45,8 @@ const inferMetricType = (title = "") => {
   if (t.includes("dsa") || t.includes("problem")) return "problems_solved";
   if (t.includes("book") && (t.includes("read") || t.includes("reading"))) return "books_completed";
   if (t.includes("english") && t.includes("session")) return "sessions_completed";
-  if (t.includes("gate") && (t.includes("revision") || t.includes("question"))) return "questions_solved";
+  if (t.includes("gate") && t.includes("revision")) return "topics_revised";
+  if (t.includes("gate") && t.includes("question")) return "questions_solved";
   if (t.includes("nexus") && (t.includes("complete") || t.includes("v1"))) return "milestones_completed";
   return "count";
 };
