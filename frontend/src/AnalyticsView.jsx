@@ -24,6 +24,8 @@ function AnalyticsView({ token }) {
   const [preset, setPreset] = useState("week");
   const [endDate, setEndDate] = useState(today);
   const [data, setData] = useState(null);
+  const [habitStats, setHabitStats] = useState([]);
+  const [habits, setHabits] = useState([]);
   const [error, setError] = useState("");
 
   const range = useMemo(() => {
@@ -37,12 +39,23 @@ function AnalyticsView({ token }) {
     (async () => {
       try {
         setError("");
-        const response = await fetch(`${API}/analytics/summary?start_date=${range.start}&end_date=${range.end}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const body = await response.json().catch(() => null);
-        if (!response.ok) throw new Error(body?.detail || `Request failed (${response.status})`);
-        if (!cancelled) setData(body);
+        const headers = { Authorization: `Bearer ${token}` };
+        const [analyticsResponse, statsResponse, habitsResponse] = await Promise.all([
+          fetch(`${API}/analytics/summary?start_date=${range.start}&end_date=${range.end}`, { headers }),
+          fetch(`${API}/habits/stats?start_date=${range.start}&end_date=${range.end}`, { headers }),
+          fetch(`${API}/habits`, { headers }),
+        ]);
+        const body = await analyticsResponse.json().catch(() => null);
+        const statsBody = await statsResponse.json().catch(() => null);
+        const habitsBody = await habitsResponse.json().catch(() => null);
+        if (!analyticsResponse.ok) throw new Error(body?.detail || `Request failed (${analyticsResponse.status})`);
+        if (!statsResponse.ok) throw new Error(statsBody?.detail || `Habit stats request failed (${statsResponse.status})`);
+        if (!habitsResponse.ok) throw new Error(habitsBody?.detail || `Habits request failed (${habitsResponse.status})`);
+        if (!cancelled) {
+          setData(body);
+          setHabitStats(statsBody || []);
+          setHabits(habitsBody || []);
+        }
       } catch (err) {
         if (!cancelled) setError(err.message);
       }
@@ -53,6 +66,8 @@ function AnalyticsView({ token }) {
   const totals = data?.totals || {};
   const daily = data?.daily || [];
   const breakdown = data?.breakdown || [];
+  const reflection = data?.reflection || {};
+  const insights = data?.insights || [];
 
   return <section className="panel">
     <div className="panel-head">
@@ -75,10 +90,45 @@ function AnalyticsView({ token }) {
       <div className="metric-grid">
         <Metric label="Focused time" value={fmt(totals.actual_seconds)} />
         <Metric label="Planned time" value={fmt(totals.planned_seconds)} />
-        <Metric label="Execution" value={`${totals.schedule_completion_rate || 0}%`} />
+        <Metric label="Schedule completion" value={`${totals.schedule_completion_rate || 0}%`} />
+        <Metric label="Time execution" value={`${totals.time_execution_rate || 0}%`} />
         <Metric label="Sessions" value={totals.session_count || 0} />
         <Metric label="Activities" value={totals.activity_count || 0} />
         <Metric label="Diary days" value={totals.diary_days || 0} />
+      </div>
+
+      <div className="two-col" style={{ marginTop: "1rem" }}>
+        <div className="panel">
+          <PanelTitle eyebrow="HABITS" title="Consistency" />
+          {habitStats.length ? <div className="item-list">
+            {habitStats.map(stat => {
+              const habit = habits.find(h => h.id === stat.habit_id);
+              return <div className="list-item" key={stat.habit_id}>
+                <div>
+                  <strong>{habit?.name || "Habit"}</strong>
+                  <span>{stat.completed_count}/{stat.expected_count} expected · {stat.current_streak} current streak · {stat.best_streak} best</span>
+                </div>
+                <b>{stat.consistency_percent}%</b>
+              </div>;
+            })}
+          </div> : <Empty text="No habits available in this range." />}
+        </div>
+        <div className="panel">
+          <PanelTitle eyebrow="REFLECTION" title="Review quality" />
+          <div className="metric-grid">
+            <Metric label="Coverage" value={`${reflection.coverage_percent || 0}%`} />
+            <Metric label="Entries" value={reflection.days_with_entries || 0} />
+            <Metric label="Learning notes" value={reflection.days_with_learning || 0} />
+            <Metric label="Tomorrow changes" value={reflection.days_with_tomorrow_changes || 0} />
+          </div>
+        </div>
+      </div>
+
+      <div className="panel" style={{ marginTop: "1rem" }}>
+        <PanelTitle eyebrow="INSIGHTS" title="Operating signals" />
+        {insights.length ? <div className="item-list">
+          {insights.map((insight, index) => <div className="list-item" key={index}><div><strong>Signal {index + 1}</strong><span>{insight}</span></div></div>)}
+        </div> : <Empty text="No additional signals for this range." />}
       </div>
 
       <div className="two-col" style={{ marginTop: "1rem" }}>
