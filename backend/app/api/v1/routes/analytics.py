@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from collections import defaultdict
+import re
 from sqlalchemy.orm import Session
 
 from app.api.v1.routes.auth import get_current_user
@@ -33,6 +34,11 @@ def local_day(dt: datetime) -> date:
 
 def seconds_between(start: datetime, end: datetime) -> int:
     return max(0, int((end - start).total_seconds()))
+
+
+def canonical_label(value: str | None) -> tuple[str, str]:
+    label = re.sub(r"\\s+", " ", (value or "Unlinked").strip())
+    return label, label.casefold()
 
 
 @router.get("/summary", response_model=AnalyticsSummary)
@@ -135,15 +141,13 @@ def summary(
 
     breakdown_map = defaultdict(lambda: {"label": "", "seconds": 0, "session_count": 0, "activity_count": 0, "metric_total": 0})
     for session in sessions:
-        label = (session.title or "Unlinked").strip()
-        key = label.casefold() or "unlinked"
+        label, key = canonical_label(session.title)
         bucket = breakdown_map[key]
         bucket["label"] = bucket["label"] or label
         bucket["seconds"] += session.duration_seconds or 0
         bucket["session_count"] += 1
     for activity in activities:
-        label = (activity.title or "Unlinked").strip()
-        key = label.casefold() or "unlinked"
+        label, key = canonical_label(activity.title)
         bucket = breakdown_map[key]
         bucket["label"] = bucket["label"] or label
         bucket["activity_count"] += 1
