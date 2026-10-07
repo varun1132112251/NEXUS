@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -47,7 +48,7 @@ def get_current_user(
     try:
         payload = decode_access_token(credentials.credentials)
         subject = payload.get("sub")
-        user = db.get(User, subject)
+        user = db.get(User, UUID(subject)) if isinstance(subject, str) else None
     except (ValueError, TypeError):
         user = None
     if user is None:
