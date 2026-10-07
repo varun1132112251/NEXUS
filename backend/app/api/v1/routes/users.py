@@ -29,11 +29,6 @@ def create_user(user_in: UserCreate, db: Session = Depends(get_db)) -> User:
     return user
 
 
-@router.get("", response_model=list[UserRead])
-def list_users(db: Session = Depends(get_db)) -> list[User]:
-    return list(db.scalars(select(User)).all())
-
-
 @router.get("/me", response_model=UserRead)
 def read_current_user(current_user: User = Depends(get_current_user)) -> User:
     return current_user
