@@ -6,7 +6,6 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.v1.routes.auth_helpers import issue_access_token
 from app.core.google_auth import verify_google_id_token
 from app.core.mailer import send_auth_email
 from app.core.security import (
@@ -72,7 +71,7 @@ def start_email_verification(payload: EmailStartRequest, db: Session = Depends(g
     if existing and existing.email_verified:
         return {"message": "If this email can be used for authentication, a message has been sent."}
 
-    raw = create_one_time_token()
+    raw = create_one_time_token()[:6].upper()
     token = AuthToken(
         email=email,
         purpose="email_verification",
@@ -194,7 +193,7 @@ def complete_account_setup(payload: AccountSetupRequest, db: Session = Depends(g
 def start_password_reset(payload: PasswordResetStartRequest, db: Session = Depends(get_db)) -> dict:
     user = db.scalar(select(User).where(User.email == payload.email, User.email_verified.is_(True)))
     if user:
-        raw = create_one_time_token()
+        raw = create_one_time_token()[:6].upper()
         db.add(
             AuthToken(
                 user_id=user.id,
