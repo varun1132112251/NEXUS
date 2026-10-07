@@ -123,12 +123,14 @@ function Login({ onLogin }) {
       <h1>NEXUS</h1>
       <p className="muted">{mode === "register" ? "Create your operating account." : "Plan. Execute. Track. Reflect. Improve."}</p>
       <form onSubmit={submit}>
-        {mode === "register"
-          ? <>
-              <label>Username<input value={username} onChange={e => setUsername(e.target.value)} required /></label>
-              <label>Email<input type="email" value={email} onChange={e => setEmail(e.target.value)} required /></label>
-            </>
-          : <label>Username or email<input value={identifier} onChange={e => setIdentifier(e.target.value)} required />}
+        {mode === "register" ? (
+          <>
+            <label>Username<input value={username} onChange={e => setUsername(e.target.value)} required /></label>
+            <label>Email<input type="email" value={email} onChange={e => setEmail(e.target.value)} required /></label>
+          </>
+        ) : (
+          <label>Username or email<input value={identifier} onChange={e => setIdentifier(e.target.value)} required /></label>
+        )}
         <label>Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} minLength={8} required /></label>
         {error && <div className="error">{error}</div>}
         <button className="primary full" disabled={busy}>{busy ? "Working…" : mode === "register" ? "Create account" : "Enter NEXUS"}</button>
