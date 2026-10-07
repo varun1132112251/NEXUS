@@ -1,4 +1,5 @@
 import AnalyticsView from "./AnalyticsView";
+import ProfileOnboarding from "./ProfileOnboarding";
 import React, { useEffect, useMemo, useState } from "react";
 
 const API = "http://127.0.0.1:8000/api/v1";
@@ -111,9 +112,49 @@ function Login({ onLogin }) {
 
 function App() {
   const [token, setToken] = useState(localStorage.getItem("nexus_token"));
-  return token
-    ? <Dashboard token={token} onLogout={() => { localStorage.removeItem("nexus_token"); setToken(null); }} />
-    : <Login onLogin={setToken} />;
+  const [profile, setProfile] = useState(null);
+  const [checkingProfile, setCheckingProfile] = useState(Boolean(token));
+
+  useEffect(() => {
+    if (!token) {
+      setProfile(null);
+      setCheckingProfile(false);
+      return;
+    }
+
+    let cancelled = false;
+    setCheckingProfile(true);
+    api("/profile", {}, token)
+      .then(data => {
+        if (!cancelled) setProfile(data);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          localStorage.removeItem("nexus_token");
+          setToken(null);
+          setProfile(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setCheckingProfile(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [token]);
+
+  function logout() {
+    localStorage.removeItem("nexus_token");
+    setToken(null);
+    setProfile(null);
+  }
+
+  if (!token) return <Login onLogin={setToken} />;
+  if (checkingProfile) return <div className="loading">Loading NEXUS<span>•</span><span>•</span><span>•</span></div>;
+  if (!profile?.onboarding_completed) {
+    return <ProfileOnboarding token={token} onComplete={setProfile} />;
+  }
+
+  return <Dashboard token={token} onLogout={logout} />;
 }
 
 function Dashboard({ token, onLogout }) {
