@@ -10,5 +10,18 @@ from app.models.target import Target
 from app.models.task import Task
 from app.models.time_session import TimeSession
 from app.models.user import User
+from app.models.user_profile import UserProfile
 
-__all__ = ["User", "DiaryEntry", "Target", "Habit", "Project", "Task", "ScheduleItem", "TimeSession", "ActivityRecord", "RoutineTemplate"]
+__all__ = [
+    "User",
+    "UserProfile",
+    "DiaryEntry",
+    "Target",
+    "Habit",
+    "Project",
+    "Task",
+    "ScheduleItem",
+    "TimeSession",
+    "ActivityRecord",
+    "RoutineTemplate",
+]
