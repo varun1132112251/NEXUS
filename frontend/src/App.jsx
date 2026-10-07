@@ -76,27 +76,104 @@ const metricKey = (type) => ({
 }[type] || "count");
 
 function Login({ onLogin }) {
-  const [mode, setMode] = useState("login");
+  const [mode, setMode] = useState("signin");
+  const [email, setEmail] = useState("");
   const [identifier, setIdentifier] = useState("");
   const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [setupToken, setSetupToken] = useState("");
+  const [setupName, setSetupName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+
+  useEffect(() => {
+    if (!googleClientId || !window.google?.accounts?.id) return;
+    const button = document.getElementById("google-signin-button");
+    if (!button) return;
+    window.google.accounts.id.initialize({
+      client_id: googleClientId,
+      callback: handleGoogleCredential,
+    });
+    button.innerHTML = "";
+    window.google.accounts.id.renderButton(button, {
+      theme: "outline",
+      size: "large",
+      width: 426,
+      text: "continue_with",
+    });
+  }, [googleClientId, mode]);
+
+  async function handleGoogleCredential(response) {
+    setBusy(true);
+    setError("");
+    try {
+      const data = await api("/auth/google", {
+        method: "POST",
+        body: JSON.stringify({ credential: response.credential }),
+      });
+      if (data.requires_setup) {
+        setSetupToken(data.setup_token);
+        setEmail(data.email || "");
+        setSetupName(data.name || "");
+        setMode("setup");
+      } else {
+        localStorage.setItem("nexus_token", data.access_token);
+        onLogin(data.access_token);
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function submit(e) {
     e.preventDefault();
     setBusy(true);
     setError("");
     try {
-      if (mode === "register") {
-        await api("/users", {
+      if (mode === "signup") {
+        await api("/auth/email/start", {
           method: "POST",
-          body: JSON.stringify({ username: username.trim(), email: email.trim(), password }),
+          body: JSON.stringify({ email: email.trim() }),
         });
-        const data = await api("/auth/login", {
+        setMode("verify");
+      } else if (mode === "verify") {
+        const data = await api("/auth/email/verify", {
           method: "POST",
-          body: JSON.stringify({ username: username.trim(), password }),
+          body: JSON.stringify({ email: email.trim(), code: code.trim().toUpperCase() }),
+        });
+        if (data.access_token) {
+          localStorage.setItem("nexus_token", data.access_token);
+          onLogin(data.access_token);
+        } else {
+          setSetupToken(data.setup_token);
+          setMode("setup");
+        }
+      } else if (mode === "setup") {
+        const data = await api("/auth/setup", {
+          method: "POST",
+          body: JSON.stringify({
+            setup_token: setupToken,
+            username: username.trim(),
+            password,
+          }),
+        });
+        localStorage.setItem("nexus_token", data.access_token);
+        onLogin(data.access_token);
+      } else if (mode === "forgot") {
+        await api("/auth/password-reset/start", {
+          method: "POST",
+          body: JSON.stringify({ email: email.trim() }),
+        });
+        setMode("reset");
+      } else if (mode === "reset") {
+        const data = await api("/auth/password-reset/complete", {
+          method: "POST",
+          body: JSON.stringify({ reset_token: code.trim().toUpperCase(), password }),
         });
         localStorage.setItem("nexus_token", data.access_token);
         onLogin(data.access_token);
@@ -116,28 +193,72 @@ function Login({ onLogin }) {
     }
   }
 
+  function switchMode(next) {
+    setError("");
+    setCode("");
+    setPassword("");
+    setMode(next);
+  }
+
+  const titles = {
+    signin: ["Welcome back.", "Sign in to your NEXUS account."],
+    signup: ["Create your operating account.", "Verify your email first. Then choose your NEXUS credentials."],
+    verify: ["Check your email.", `Enter the 6-character verification code sent to ${email}.`],
+    setup: ["Finish your NEXUS account.", "Your identity is verified. Choose your NEXUS username and password."],
+    forgot: ["Reset your password.", "We'll send a recovery code to your verified email."],
+    reset: ["Create a new password.", `Enter the recovery code sent to ${email}.`],
+  };
+  const [title, subtitle] = titles[mode];
+
   return <main className="login-shell">
     <section className="login-card">
       <div className="brand-mark">N</div>
       <p className="eyebrow">PERSONAL OPERATING SYSTEM</p>
       <h1>NEXUS</h1>
-      <p className="muted">{mode === "register" ? "Create your operating account." : "Plan. Execute. Track. Reflect. Improve."}</p>
+      <p className="muted">{title}</p>
+
+      {(mode === "signin" || mode === "signup") && googleClientId && (
+        <>
+          <div id="google-signin-button" className="google-auth-button" />
+          <div className="auth-divider"><span>or</span></div>
+        </>
+      )}
+
       <form onSubmit={submit}>
-        {mode === "register" ? (
-          <>
-            <label>Username<input value={username} onChange={e => setUsername(e.target.value)} required /></label>
-            <label>Email<input type="email" value={email} onChange={e => setEmail(e.target.value)} required /></label>
-          </>
-        ) : (
+        {mode === "signin" && <>
           <label>Username or email<input value={identifier} onChange={e => setIdentifier(e.target.value)} required /></label>
-        )}
-        <label>Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} minLength={8} required /></label>
+          <label>Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} minLength={8} required /></label>
+        </>}
+        {mode === "signup" && <label>Email<input type="email" value={email} onChange={e => setEmail(e.target.value)} required /></label>}
+        {mode === "verify" && <label>Verification code<input value={code} onChange={e => setCode(e.target.value)} inputMode="text" maxLength={6} required /></label>}
+        {mode === "setup" && <>
+          <label>Verified email<input value={email} disabled /></label>
+          <label>Username<input value={username} onChange={e => setUsername(e.target.value)} required /></label>
+          <label>Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} minLength={8} required /></label>
+        </>}
+        {mode === "forgot" && <label>Verified email<input type="email" value={email} onChange={e => setEmail(e.target.value)} required /></label>}
+        {mode === "reset" && <>
+          <label>Recovery code<input value={code} onChange={e => setCode(e.target.value)} inputMode="text" maxLength={6} required /></label>
+          <label>New password<input type="password" value={password} onChange={e => setPassword(e.target.value)} minLength={8} required /></label>
+        </>}
         {error && <div className="error">{error}</div>}
-        <button className="primary full" disabled={busy}>{busy ? "Working…" : mode === "register" ? "Create account" : "Enter NEXUS"}</button>
+        <button className="primary full" disabled={busy}>
+          {busy ? "Working…" :
+            mode === "signin" ? "Enter NEXUS" :
+            mode === "signup" ? "Send verification code" :
+            mode === "verify" ? "Verify email" :
+            mode === "setup" ? "Create NEXUS account" :
+            mode === "forgot" ? "Send recovery code" : "Reset password"}
+        </button>
       </form>
-      <button className="auth-switch" type="button" onClick={() => { setError(""); setMode(current => current === "login" ? "register" : "login"); }}>
-        {mode === "register" ? "Already have an account? Sign in" : "New to NEXUS? Create an account"}
-      </button>
+
+      {mode === "signin" && <div className="auth-links">
+        <button className="auth-switch" type="button" onClick={() => switchMode("forgot")}>Forgot password?</button>
+        <button className="auth-switch" type="button" onClick={() => switchMode("signup")}>New to NEXUS? Create an account</button>
+      </div>}
+      {mode === "signup" && <button className="auth-switch" type="button" onClick={() => switchMode("signin")}>Already have an account? Sign in</button>}
+      {(mode === "verify" || mode === "setup" || mode === "forgot" || mode === "reset") && <button className="auth-switch" type="button" onClick={() => switchMode("signin")}>Back to sign in</button>}
+      {mode !== "signin" && mode !== "signup" && <p className="muted small">{subtitle}</p>}
     </section>
   </main>;
 }
