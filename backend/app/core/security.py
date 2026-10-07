@@ -46,3 +46,57 @@ def decode_access_token(token: str) -> dict:
         raise ValueError("Token has expired.") from exc
     except jwt.InvalidTokenError as exc:
         raise ValueError("Invalid token.") from exc
+
+import hashlib
+import secrets
+
+
+def create_auth_ticket(
+    *,
+    purpose: str,
+    email: str,
+    name: str | None = None,
+    provider: str | None = None,
+    provider_subject: str | None = None,
+    expires_delta: timedelta | None = None,
+) -> str:
+    issued_at = datetime.now(UTC)
+    if expires_delta is None:
+        expires_delta = timedelta(minutes=settings.auth_ticket_expire_minutes)
+    payload = {
+        "typ": "auth_ticket",
+        "purpose": purpose,
+        "email": email,
+        "iat": int(issued_at.timestamp()),
+        "exp": int((issued_at + expires_delta).timestamp()),
+    }
+    if name:
+        payload["name"] = name
+    if provider:
+        payload["provider"] = provider
+    if provider_subject:
+        payload["provider_subject"] = provider_subject
+    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+
+
+def decode_auth_ticket(token: str, expected_purpose: str) -> dict:
+    try:
+        payload = jwt.decode(
+            token,
+            settings.jwt_secret_key,
+            algorithms=[settings.jwt_algorithm],
+            options={"require": ["typ", "purpose", "email", "exp", "iat"]},
+        )
+    except jwt.InvalidTokenError as exc:
+        raise ValueError("Invalid authentication ticket.") from exc
+    if payload.get("typ") != "auth_ticket" or payload.get("purpose") != expected_purpose:
+        raise ValueError("Invalid authentication ticket.")
+    return payload
+
+
+def create_one_time_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def hash_one_time_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
