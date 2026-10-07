@@ -68,8 +68,7 @@ def client_for(session: UserSession) -> TestClient:
 def test_public_user_listing_is_removed() -> None:
     client = TestClient(app)
     response = client.get("/api/v1/users")
-    assert response.status_code == 405
-
+    assert response.status_code == 404
 
 def test_users_me_requires_bearer_token() -> None:
     client = TestClient(app)
