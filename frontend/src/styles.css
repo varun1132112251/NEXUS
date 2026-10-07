@@ -31,3 +31,15 @@ nav button{border:0;background:transparent;text-align:left;width:100%;padding:11
 .target-card-row .target{margin-top:0}
 .target-editor{display:grid;gap:12px;margin-top:18px;padding:14px;border:1px solid #29313d;border-radius:10px;background:#0a0e14}
 .danger-text{color:#ff8790!important;border-color:#5d2930!important}
+
+.auth-switch{margin-top:16px;width:100%;border:0;background:transparent;color:#8e98a8;font-size:12px}.auth-switch:hover{color:#d7ff48}
+.onboarding-shell{min-height:100vh;display:grid;place-items:center;padding:28px;background:radial-gradient(circle at 50% 15%,#172131 0,#080a0f 50%)}
+.onboarding-card{width:min(820px,100%);border:1px solid #252c38;background:#0d1118;border-radius:24px;padding:34px;box-shadow:0 30px 100px #0008}
+.onboarding-brand{display:flex;align-items:center;gap:14px;margin-bottom:34px}.onboarding-brand strong{font-size:15px}.onboarding-brand .brand-mark{margin:0}
+.onboarding-progress{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:36px}.progress-step{display:flex;align-items:center;gap:9px;padding-bottom:10px;border-bottom:1px solid #252c38;color:#586373}.progress-step.active{border-color:#d7ff48;color:#d7ff48}.progress-step span{width:24px;height:24px;display:grid;place-items:center;border:1px solid currentColor;border-radius:50%;font:500 10px 'DM Mono'}.progress-step small{font-size:10px;text-transform:uppercase;letter-spacing:1px}
+.onboarding-content{min-height:390px}.onboarding-content h1{max-width:650px;font-size:34px;line-height:1.1;letter-spacing:-1.5px;margin:8px 0 12px}.onboarding-content>.muted{max-width:650px;font-size:13px;line-height:1.7}
+.onboarding-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:28px}.onboarding-grid select,.onboarding-content select{width:100%;background:#080b10;border:1px solid #29313d;color:#edf2f8;border-radius:10px;padding:13px 14px;outline:none}
+.availability-block{display:grid;gap:12px;margin:28px 0}.availability-row{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:12px;align-items:end;padding:16px;border:1px solid #202732;background:#0a0e14;border-radius:12px}.availability-row>strong{font-size:12px}.availability-row label{font-size:9px}
+.choice-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:30px}.choice{display:grid;gap:10px;text-align:left;padding:18px;border:1px solid #29313d;border-radius:12px;background:#080b10;color:#edf2f8}.choice:hover,.choice.active{border-color:#d7ff48;background:#12180b}.choice strong{font-size:13px}.choice span{font-size:11px;line-height:1.6;color:#788392}
+.onboarding-actions{display:flex;justify-content:space-between;gap:10px;margin-top:20px;padding-top:20px;border-top:1px solid #202732}
+@media(max-width:700px){.onboarding-card{padding:24px}.onboarding-grid,.choice-grid{grid-template-columns:1fr}.availability-row{grid-template-columns:1fr 1fr}.availability-row>strong{grid-column:1 / -1}.onboarding-content h1{font-size:27px}.onboarding-content{min-height:0}.progress-step small{display:none}}
