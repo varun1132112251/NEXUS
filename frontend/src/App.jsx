@@ -76,22 +76,44 @@ const metricKey = (type) => ({
 }[type] || "count");
 
 function Login({ onLogin }) {
+  const [mode, setMode] = useState("login");
   const [identifier, setIdentifier] = useState("");
+  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   async function submit(e) {
-    e.preventDefault(); setBusy(true); setError("");
+    e.preventDefault();
+    setBusy(true);
+    setError("");
     try {
-      const key = identifier.includes("@") ? "email" : "username";
-      const data = await api("/auth/login", {
-        method: "POST",
-        body: JSON.stringify({ [key]: identifier, password }),
-      });
-      localStorage.setItem("nexus_token", data.access_token);
-      onLogin(data.access_token);
-    } catch (err) { setError(err.message); } finally { setBusy(false); }
+      if (mode === "register") {
+        await api("/users", {
+          method: "POST",
+          body: JSON.stringify({ username: username.trim(), email: email.trim(), password }),
+        });
+        const data = await api("/auth/login", {
+          method: "POST",
+          body: JSON.stringify({ username: username.trim(), password }),
+        });
+        localStorage.setItem("nexus_token", data.access_token);
+        onLogin(data.access_token);
+      } else {
+        const key = identifier.includes("@") ? "email" : "username";
+        const data = await api("/auth/login", {
+          method: "POST",
+          body: JSON.stringify({ [key]: identifier.trim(), password }),
+        });
+        localStorage.setItem("nexus_token", data.access_token);
+        onLogin(data.access_token);
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
   }
 
   return <main className="login-shell">
@@ -99,13 +121,21 @@ function Login({ onLogin }) {
       <div className="brand-mark">N</div>
       <p className="eyebrow">PERSONAL OPERATING SYSTEM</p>
       <h1>NEXUS</h1>
-      <p className="muted">Plan. Execute. Track. Reflect. Improve.</p>
+      <p className="muted">{mode === "register" ? "Create your operating account." : "Plan. Execute. Track. Reflect. Improve."}</p>
       <form onSubmit={submit}>
-        <label>Username or email<input value={identifier} onChange={e => setIdentifier(e.target.value)} required /></label>
-        <label>Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} required /></label>
+        {mode === "register"
+          ? <>
+              <label>Username<input value={username} onChange={e => setUsername(e.target.value)} required /></label>
+              <label>Email<input type="email" value={email} onChange={e => setEmail(e.target.value)} required /></label>
+            </>
+          : <label>Username or email<input value={identifier} onChange={e => setIdentifier(e.target.value)} required />}
+        <label>Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} minLength={8} required /></label>
         {error && <div className="error">{error}</div>}
-        <button className="primary full" disabled={busy}>{busy ? "Signing in…" : "Enter NEXUS"}</button>
+        <button className="primary full" disabled={busy}>{busy ? "Working…" : mode === "register" ? "Create account" : "Enter NEXUS"}</button>
       </form>
+      <button className="auth-switch" type="button" onClick={() => { setError(""); setMode(current => current === "login" ? "register" : "login"); }}>
+        {mode === "register" ? "Already have an account? Sign in" : "New to NEXUS? Create an account"}
+      </button>
     </section>
   </main>;
 }
