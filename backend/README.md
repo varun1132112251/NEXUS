@@ -1,11 +1,6 @@
-# NEXUS Backend — Phase 1
+# NEXUS Backend
 
-This directory contains only the initial NEXUS backend foundation: FastAPI, Uvicorn, SQLAlchemy 2.x, PostgreSQL configuration, Alembic, settings, and a health check. Domain features are intentionally out of scope.
-
-## Prerequisites
-
-- Python 3.12
-- PostgreSQL, if you plan to run database migrations or use the database layer
+FastAPI backend for NEXUS, including verified authentication, profile onboarding, planning, execution, and progress APIs.
 
 ## Local setup
 
@@ -19,18 +14,36 @@ python -m pip install -e ".[dev]"
 Copy-Item .env.example .env
 ```
 
-Set `JWT_SECRET_KEY` in `.env` to a long, randomly generated secret before
-starting the API. The application requires this value and has no fallback.
-Keep `.env` local; it is ignored by Git. Also adjust `DATABASE_URL` for your
-local PostgreSQL instance.
+Set `JWT_SECRET_KEY` in `.env` to a long random secret. Keep `.env` local.
 
-## Run the API
+### Authentication configuration
+
+For Google sign-in, create a Google OAuth web client and set:
+
+```
+GOOGLE_CLIENT_ID=...
+```
+
+The frontend receives the same client ID through Vite as `VITE_GOOGLE_CLIENT_ID`.
+
+For local email verification/recovery, NEXUS logs the generated code to the backend terminal when SMTP is not configured. For deployed environments, configure SMTP:
+
+```
+SMTP_HOST=...
+SMTP_PORT=587
+SMTP_USERNAME=...
+SMTP_PASSWORD=...
+SMTP_FROM=...
+FRONTEND_BASE_URL=https://your-frontend.example
+```
+
+Do not use console email delivery in production.
+
+## Run
 
 ```powershell
 uvicorn app.main:app --reload
 ```
-
-The health endpoint is available at `GET /api/v1/health` and returns HTTP 200 without requiring a database connection.
 
 ## Tests
 
@@ -38,17 +51,18 @@ The health endpoint is available at `GET /api/v1/health` and returns HTTP 200 wi
 pytest
 ```
 
-The default test suite uses an in-memory session double for user-route coverage and
-does not require PostgreSQL. Database schema changes are validated separately with
-Alembic against a configured PostgreSQL instance.
-
-## Database migrations
-
-Alembic is configured to read `DATABASE_URL` from the application settings.
+## Migrations
 
 ```powershell
 alembic upgrade head
 ```
 
-The `User` model stores Argon2id password hashes, and user creation requires a
-password. Login, tokens, OAuth, and authorization remain out of scope.
+Authentication now supports:
+
+- verified email registration
+- Google identity sign-in
+- NEXUS username/password creation after identity verification
+- password login for verified accounts
+- password recovery through verified email
+- Argon2id password hashing
+- short-lived JWT access tokens and setup tickets
