@@ -23,6 +23,10 @@ class ProfileSession:
         now = datetime.now(UTC)
         if self.pending.id is None:
             self.pending.id = uuid4()
+        self.pending.timezone = self.pending.timezone or "Asia/Kolkata"
+        self.pending.onboarding_completed = (
+            False if self.pending.onboarding_completed is None else self.pending.onboarding_completed
+        )
         self.pending.created_at = self.pending.created_at or now
         self.pending.updated_at = now
         self.profiles[self.pending.user_id] = self.pending
