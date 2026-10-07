@@ -89,7 +89,7 @@ def start_email_verification(payload: EmailStartRequest, db: Session = Depends(g
     return {"message": "If this email can be used for authentication, a verification message has been sent."}
 
 
-@router.post("/email/verify", response_model=Token | dict)
+@router.post("/email/verify")
 def verify_email(payload: EmailVerifyRequest, db: Session = Depends(get_db)):
     token = db.scalar(
         select(AuthToken)
