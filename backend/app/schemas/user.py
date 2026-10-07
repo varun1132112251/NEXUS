@@ -1,13 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
-
-
-class UserCreate(BaseModel):
-    username: str = Field(min_length=1, max_length=255)
-    email: str = Field(min_length=1, max_length=255)
-    password: str = Field(min_length=8)
+from pydantic import BaseModel, ConfigDict
 
 
 class UserRead(BaseModel):
@@ -16,5 +10,6 @@ class UserRead(BaseModel):
     id: UUID
     username: str
     email: str
+    email_verified: bool
     created_at: datetime
     updated_at: datetime
