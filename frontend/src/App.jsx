@@ -173,7 +173,7 @@ function Login({ onLogin }) {
       } else if (mode === "reset") {
         const data = await api("/auth/password-reset/complete", {
           method: "POST",
-          body: JSON.stringify({ reset_token: code.trim().toUpperCase(), password }),
+          body: JSON.stringify({ email: email.trim(), reset_token: code.trim().toUpperCase(), password }),
         });
         localStorage.setItem("nexus_token", data.access_token);
         onLogin(data.access_token);
