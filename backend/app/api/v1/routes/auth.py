@@ -217,7 +217,11 @@ def start_password_reset(payload: PasswordResetStartRequest, db: Session = Depen
 def complete_password_reset(payload: PasswordResetCompleteRequest, db: Session = Depends(get_db)) -> Token:
     token = db.scalar(
         select(AuthToken)
-        .where(AuthToken.purpose == "password_reset", AuthToken.consumed_at.is_(None))
+        .where(
+            AuthToken.email == payload.email,
+            AuthToken.purpose == "password_reset",
+            AuthToken.consumed_at.is_(None),
+        )
         .order_by(AuthToken.created_at.desc())
     )
     if token is None or token.expires_at <= datetime.now(UTC) or token.token_hash != hash_one_time_token(payload.reset_token):
