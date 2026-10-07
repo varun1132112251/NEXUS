@@ -120,22 +120,10 @@ def test_create_user_requires_password_of_at_least_eight_characters(
     assert response.status_code == 422
 
 
-def test_list_users(client: TestClient) -> None:
-    client.post(
-        "/api/v1/users",
-        json={"username": "ada", "email": "ada@example.com", "password": "correct horse"},
-    )
-    client.post(
-        "/api/v1/users",
-        json={"username": "grace", "email": "grace@example.com", "password": "correct horse"},
-    )
-
+def test_list_users_endpoint_is_removed(client: TestClient) -> None:
     response = client.get("/api/v1/users")
 
-    assert response.status_code == 200
-    users = response.json()
-    assert [user["username"] for user in users] == ["ada", "grace"]
-    assert all({"password", "password_hash"}.isdisjoint(user) for user in users)
+    assert response.status_code == 405
 
 
 @pytest.mark.parametrize(
