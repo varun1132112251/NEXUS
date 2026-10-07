@@ -70,7 +70,7 @@ def start_email_verification(payload: EmailStartRequest, db: Session = Depends(g
     email = payload.email
     existing = db.scalar(select(User).where(User.email == email))
     if existing and existing.email_verified:
-        return {"message": "If this email can be used for authentication, a message has been sent."}
+        raise HTTPException(status_code=409, detail="An account already exists for this email. Sign in instead.")
 
     raw = create_one_time_token()[:6].upper()
     token = AuthToken(
