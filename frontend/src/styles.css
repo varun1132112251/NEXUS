@@ -43,3 +43,34 @@ nav button{border:0;background:transparent;text-align:left;width:100%;padding:11
 .choice-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:30px}.choice{display:grid;gap:10px;text-align:left;padding:18px;border:1px solid #29313d;border-radius:12px;background:#080b10;color:#edf2f8}.choice:hover,.choice.active{border-color:#d7ff48;background:#12180b}.choice strong{font-size:13px}.choice span{font-size:11px;line-height:1.6;color:#788392}
 .onboarding-actions{display:flex;justify-content:space-between;gap:10px;margin-top:20px;padding-top:20px;border-top:1px solid #202732}
 @media(max-width:700px){.onboarding-card{padding:24px}.onboarding-grid,.choice-grid{grid-template-columns:1fr}.availability-row{grid-template-columns:1fr 1fr}.availability-row>strong{grid-column:1 / -1}.onboarding-content h1{font-size:27px}.onboarding-content{min-height:0}.progress-step small{display:none}}
+
+
+.google-auth-button {
+  width: 100%;
+  min-height: 44px;
+  display: flex;
+  justify-content: center;
+  margin: 12px 0;
+}
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #6f7f9d;
+  font-size: 12px;
+  margin: 14px 0;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  height: 1px;
+  flex: 1;
+  background: #283242;
+}
+
+.auth-links {
+  display: grid;
+  gap: 4px;
+}
