@@ -7,6 +7,7 @@ from app.api.v1.routes.auth import router as auth_router
 from app.api.v1.routes.habits import router as habits_router
 from app.api.v1.routes.health import router as health_router
 from app.api.v1.routes.projects import router as projects_router
+from app.api.v1.routes.profile import router as profile_router
 from app.api.v1.routes.schedules import router as schedules_router
 from app.api.v1.routes.routines import router as routines_router
 from app.api.v1.routes.targets import router as targets_router
@@ -21,6 +22,7 @@ api_router.include_router(activity_records_router)
 api_router.include_router(analytics_router)
 api_router.include_router(diary_router)
 api_router.include_router(users_router)
+api_router.include_router(profile_router)
 api_router.include_router(targets_router)
 api_router.include_router(habits_router)
 api_router.include_router(projects_router)
