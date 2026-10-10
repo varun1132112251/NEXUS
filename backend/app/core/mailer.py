@@ -1,4 +1,5 @@
 import logging
+import re
 import smtplib
 from email.message import EmailMessage
 from html import escape
@@ -7,49 +8,45 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+_CODE_PATTERN = re.compile(
+    r"(?:verification code is:|password reset code is:)\\s*([A-Z2-9]{6})",
+    re.IGNORECASE,
+)
+
 
 def _email_html(subject: str, body: str) -> str:
-    """Render a small, email-client-compatible NEXUS transactional email."""
+    """Render an email-client-compatible NEXUS transactional email."""
     title = escape(subject)
+    code_match = _CODE_PATTERN.search(body)
+    code = code_match.group(1) if code_match else None
+
     paragraphs = []
-    for block in body.split("\n\n"):
-        lines = block.splitlines()
-        content = "<br>".join(escape(line) for line in lines)
-        paragraphs.append(
-            '<p style="margin:0 0 18px;color:#334155;font-size:15px;'
-            'line-height:1.7;">' + content + "</p>"
-        )
-    content_html = "\n".join(paragraphs)
+    for block in body.split("\\n\\n"):
+        if code_match and (
+            _CODE_PATTERN.search(block)
+            or re.search(r"this code expires in 15 minutes", block, re.IGNORECASE)
+        ):
+            continue
+        content = "<br>".join(escape(line) for line in block.splitlines())
+        if content:
+            paragraphs.append(
+                '<p style="margin:0 0 18px;color:#334155;font-size:15px;'
+                'line-height:1.7;">' + content + "</p>"
+            )
+    content_html = "\\n".join(paragraphs)
 
-    # Codes are identified by the stable phrase used by auth email callers.
-    # Escape all dynamic content before inserting it into HTML.
-    import re
-
-    code_match = re.search(r"(?:verification code is:|password reset code is:)\s*([A-Z2-9]{6})", body, re.IGNORECASE)
     code_html = ""
-    if code_match:
-        code = escape(code_match.group(1))
+    if code:
         code_html = (
             '<div style="margin:24px 0;padding:20px 16px;text-align:center;'
             'background:#f1f5f9;border:1px solid #dbe3ee;border-radius:12px;">'
             '<div style="font-size:11px;font-weight:700;letter-spacing:2px;'
             'color:#64748b;text-transform:uppercase;margin-bottom:8px;">'
-            'Your verification code</div>'
+            'Your secure code</div>'
             f'<div style="font-family:Consolas,Monaco,monospace;font-size:30px;'
-            f'font-weight:700;letter-spacing:7px;color:#0f172a;">{code}</div>'
-            '</div>'
-        )
-        content_html = content_html.replace(
-            f"<p style=\"margin:0 0 18px;color:#334155;font-size:15px;line-height:1.7;\">"
-            f"Your NEXUS verification code is: {code_match.group(1)}<br><br>"
-            f"This code expires in 15 minutes.</p>",
-            "",
-        )
-        content_html = content_html.replace(
-            f"<p style=\"margin:0 0 18px;color:#334155;font-size:15px;line-height:1.7;\">"
-            f"Your NEXUS password reset code is: {code_match.group(1)}<br><br>"
-            f"This code expires in 15 minutes.</p>",
-            "",
+            f'font-weight:700;letter-spacing:7px;color:#0f172a;">{escape(code)}</div>'
+            '<div style="margin-top:12px;color:#475569;font-size:13px;">'
+            'Expires in 15 minutes</div></div>'
         )
 
     return f"""<!doctype html>
@@ -69,7 +66,7 @@ def _email_html(subject: str, body: str) -> str:
           {content_html}
           {code_html}
           <div style="margin-top:26px;padding-top:18px;border-top:1px solid #e2e8f0;color:#64748b;font-size:12px;line-height:1.7;">
-            If you didn't request this message, you can safely ignore it. Never share a verification code with anyone.
+            If you didn't request this message, you can safely ignore it. Never share a verification or recovery code with anyone.
           </div>
         </td></tr>
         <tr><td style="background:#f8fafc;padding:18px 32px;color:#64748b;font-size:12px;line-height:1.6;">
@@ -101,7 +98,7 @@ def send_auth_email(to_email: str, subject: str, body: str) -> None:
         return
 
     if settings.environment == "local":
-        # Development-only fallback; do not send codes to logs in non-local environments.
+        # Development-only fallback. Never use console delivery in production.
         logger.warning("NEXUS local auth email for %s: %s", to_email, body)
         return
 
