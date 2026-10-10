@@ -14,7 +14,15 @@ function api(path, options = {}, token) {
     },
   }).then(async (r) => {
     const data = await r.json().catch(() => null);
-    if (!r.ok) throw new Error(data?.detail || `Request failed (${r.status})`);
+    if (!r.ok) {
+      const detail = data?.detail;
+      const message = Array.isArray(detail)
+        ? detail.map((item) => item?.msg || "Invalid input").join(" ")
+        : typeof detail === "string"
+          ? detail
+          : `Request failed (${r.status})`;
+      throw new Error(message);
+    }
     return data;
   });
 }
@@ -89,6 +97,7 @@ function Login({ onLogin }) {
   const [recoverySession, setRecoverySession] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 
   useEffect(() => {
@@ -137,9 +146,28 @@ function Login({ onLogin }) {
     }
   }
 
+  async function resendVerificationCode() {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      await api("/auth/email/start", {
+        method: "POST",
+        body: JSON.stringify({ email: email.trim() }),
+      });
+      setCode("");
+      setNotice("A new code was requested. Check your inbox and Spam folder. Only the newest code will work.");
+    } catch (err) {
+      setError(err.message || "Could not resend the code. Please try again later.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function continueAfterRecovery() {
     setBusy(true);
     setError("");
+    setNotice("");
     try {
       const data = await api("/auth/password-reset/continue", {
         method:"POST", body:JSON.stringify({email:email.trim(), recovery_session:recoverySession})
@@ -157,10 +185,12 @@ function Login({ onLogin }) {
     e.preventDefault();
     setBusy(true);
     setError("");
+    setNotice("");
     try {
       if (mode === "signup") {
         await api("/auth/email/start", {method:"POST", body:JSON.stringify({email:email.trim()})});
         setCode("");
+        setNotice("If the address can be used for authentication, a verification email has been sent. Check your inbox and Spam folder.");
         setMode("verify");
       } else if (mode === "verify") {
         const data = await api("/auth/email/verify", {method:"POST", body:JSON.stringify({email:email.trim(), code:code.trim().toUpperCase()})});
@@ -216,6 +246,7 @@ function Login({ onLogin }) {
 
   function switchMode(next) {
     setError("");
+    setNotice("");
     setCode("");
     setPassword("");
     setConfirmPassword("");
@@ -246,13 +277,17 @@ function Login({ onLogin }) {
         <div id="google-signin-button" className="google-auth-button" aria-label="Continue with Google" />
         <div className="auth-divider"><span>or</span></div>
       </>}
+      {notice && <div className="notice" role="status">{notice}</div>}
       {mode !== "recovery-choice" && <form onSubmit={submit}>
         {mode === "signin" && <>
           <label>Username or email<input autoComplete="username" value={identifier} onChange={e=>setIdentifier(e.target.value)} required /></label>
           <label>Password<input type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} minLength={8} maxLength={128} required /></label>
         </>}
         {mode === "signup" && <label>Email<input type="email" autoComplete="email" value={email} onChange={e=>setEmail(e.target.value)} required maxLength={255}/></label>}
-        {mode === "verify" && <label>Verification code<input value={code} onChange={e=>setCode(e.target.value)} autoCapitalize="characters" inputMode="text" minLength={6} maxLength={10} required /></label>}
+        {mode === "verify" && <>
+          <label>Verification code<input value={code} onChange={e=>setCode(e.target.value.toUpperCase().replace(/\s/g, ""))} autoCapitalize="characters" autoComplete="one-time-code" inputMode="text" minLength={6} maxLength={10} required /></label>
+          <p className="muted small auth-help">Use the newest 6-character code. Codes expire after 15 minutes; check Spam if it is not in your inbox.</p>
+        </>}
         {mode === "setup" && <>
           <label>Verified email<input type="email" value={email} disabled /></label>
           <label>Username<input autoComplete="username" value={username} onChange={e=>setUsername(e.target.value)} minLength={3} maxLength={32} required /></label>
@@ -287,6 +322,7 @@ function Login({ onLogin }) {
         <button className="auth-switch" type="button" onClick={()=>switchMode("signup")}>New to NEXUS? Create an account</button>
       </div>}
       {mode === "signup" && <button className="auth-switch" type="button" onClick={()=>switchMode("signin")}>Already have an account? Sign in</button>}
+      {mode === "verify" && <button className="auth-switch" type="button" disabled={busy} onClick={resendVerificationCode}>{busy ? "Working…" : "Didn't receive a code? Resend email"}</button>}
       {(mode==="verify" || mode==="setup" || mode==="forgot" || mode==="reset" || mode==="recovery-choice" || mode==="reset-password") && <button className="auth-switch" type="button" onClick={()=>switchMode("signin")}>Back to sign in</button>}
       {mode !== "signin" && mode !== "signup" && <p className="muted small">{subtitle}</p>}
     </section>
