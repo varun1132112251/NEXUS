@@ -72,7 +72,7 @@ def _email_html(subject: str, body: str) -> str:
           {content_html}
           {code_html}
           <div style="margin-top:26px;padding-top:18px;border-top:1px solid #e2e8f0;color:#64748b;font-size:12px;line-height:1.7;">
-            NEXUS will never ask you to share your verification code with anyone.
+            NEXUS will never ask you to share your verification or recovery code with anyone.
           </div>
         </td></tr>
         <tr><td style="background:#f8fafc;padding:18px 32px;color:#64748b;font-size:12px;line-height:1.6;">
