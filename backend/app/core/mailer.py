@@ -104,8 +104,9 @@ def send_auth_email(to_email: str, subject: str, body: str) -> None:
         return
 
     if settings.environment == "local":
-        # Development-only fallback. Never use console delivery in production.
-        logger.warning("NEXUS local auth email for %s: %s", to_email, body)
+        # Development-only fallback. Log that the fallback ran, but never log
+        # verification codes or recovery content.
+        logger.warning("SMTP is not configured; auth email was not delivered to %s.", to_email)
         return
 
     raise RuntimeError("Email delivery is not configured.")
