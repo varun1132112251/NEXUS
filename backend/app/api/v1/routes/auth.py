@@ -101,11 +101,12 @@ def _enforce_send_limit(db: Session, email: str, purpose: str) -> None:
 
 
 def _latest_token(db: Session, email: str, purpose: str) -> AuthToken | None:
-    # Include consumed rows so an older token can never revive.
+    # created_at can tie for rows inserted in one PostgreSQL transaction. UUID
+    # provides a deterministic tie-breaker; both columns are indexed/cheap.
     return db.scalar(
         select(AuthToken)
         .where(AuthToken.email == email, AuthToken.purpose == purpose)
-        .order_by(AuthToken.created_at.desc())
+        .order_by(AuthToken.created_at.desc(), AuthToken.id.desc())
         .limit(1)
         .with_for_update()
     )
@@ -178,8 +179,9 @@ def start_email_verification(payload: EmailStartRequest, db: Session = Depends(g
     try:
         send_auth_email(
             email,
-            "Verify your NEXUS email",
-            f"Your NEXUS verification code is: {code}\n\nThis code expires in 15 minutes.",
+            "Verify your email address — NEXUS",
+            "Hello,\n\nWelcome to NEXUS — your personalized operating system for goals, routines, and productivity.\n\nTo complete your registration, enter the verification code below on the NEXUS registration page.\n\n"
+            + f"Your NEXUS verification code is: {code}\n\nThis code expires in 15 minutes.\n\nIf you did not request this code, you can safely ignore this email. Never share your verification code with anyone.",
         )
     except Exception as exc:
         logger.exception("Failed to deliver NEXUS email verification.")
@@ -239,6 +241,8 @@ def google_login(payload: GoogleLoginRequest, db: Session = Depends(get_db)) -> 
             return GoogleAuthResponse(requires_setup=False, access_token=create_access_token(user.id, auth_version=_auth_version(user)))
     user = db.scalar(select(User).where(User.email == email))
     if user:
+        if not user.email_verified:
+            raise HTTPException(status_code=409, detail="Verify this email with NEXUS before linking Google sign-in.")
         identity = AuthIdentity(user_id=user.id, provider="google", provider_subject=subject)
         user.email_verified = True
         db.add(identity)
@@ -308,8 +312,9 @@ def start_password_reset(payload: PasswordResetStartRequest, db: Session = Depen
         db.commit()
         try:
             send_auth_email(
-                user.email, "Reset your NEXUS password",
-                f"Your NEXUS password reset code is: {code}\n\nThis code expires in 15 minutes.",
+                user.email, "Reset your NEXUS password — NEXUS",
+                "Hello,\n\nWe received a request to recover your NEXUS account. Use the code below to continue with password recovery.\n\n"
+                + f"Your NEXUS password reset code is: {code}\n\nThis code expires in 15 minutes.\n\nIf you did not request a password reset, you can safely ignore this email. Never share your recovery code with anyone.",
             )
         except Exception:
             logger.exception("Failed to deliver NEXUS password-reset email.")
