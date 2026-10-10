@@ -285,7 +285,7 @@ function Login({ onLogin }) {
         </>}
         {mode === "signup" && <label>Email<input type="email" autoComplete="email" value={email} onChange={e=>setEmail(e.target.value)} required maxLength={255}/></label>}
         {mode === "verify" && <>
-          <label>Verification code<input value={code} onChange={e=>setCode(e.target.value.toUpperCase().replace(/\\s/g, ""))} autoCapitalize="characters" autoComplete="one-time-code" inputMode="text" minLength={6} maxLength={10} required /></label>
+          <label>Verification code<input value={code} onChange={e=>setCode(e.target.value.toUpperCase().replace(/\s/g, ""))} autoCapitalize="characters" autoComplete="one-time-code" inputMode="text" minLength={6} maxLength={10} required /></label>
           <p className="muted small auth-help">Use the newest 6-character code. Codes expire after 15 minutes; check Spam if it is not in your inbox.</p>
         </>}
         {mode === "setup" && <>
