@@ -8,8 +8,10 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Verification and reset codes contain six characters from the alphabet defined
+# in app.core.security.create_verification_code.
 _CODE_PATTERN = re.compile(
-    r"(?:verification code is:|password reset code is:)\\s*([A-Z2-9]{6})",
+    r"(?:verification code is:|password reset code is:)\s*([A-Z2-9]{6})",
     re.IGNORECASE,
 )
 
@@ -20,9 +22,11 @@ def _email_html(subject: str, body: str) -> str:
     code_match = _CODE_PATTERN.search(body)
     code = code_match.group(1) if code_match else None
 
-    paragraphs = []
-    for block in body.split("\\n\\n"):
-        if code_match and (
+    # Remove the code line and expiry line from the prose; they are displayed
+    # separately in the prominent code card below.
+    paragraphs: list[str] = []
+    for block in re.split(r"\n\s*\n", body.strip()):
+        if code and (
             _CODE_PATTERN.search(block)
             or re.search(r"this code expires in 15 minutes", block, re.IGNORECASE)
         ):
@@ -33,15 +37,15 @@ def _email_html(subject: str, body: str) -> str:
                 '<p style="margin:0 0 18px;color:#334155;font-size:15px;'
                 'line-height:1.7;">' + content + "</p>"
             )
-    content_html = "\\n".join(paragraphs)
+    content_html = "\n".join(paragraphs)
 
     code_html = ""
     if code:
         code_html = (
-            '<div style="margin:24px 0;padding:20px 16px;text-align:center;'
+            '<div style="margin:24px 0;padding:22px 16px;text-align:center;'
             'background:#f1f5f9;border:1px solid #dbe3ee;border-radius:12px;">'
             '<div style="font-size:11px;font-weight:700;letter-spacing:2px;'
-            'color:#64748b;text-transform:uppercase;margin-bottom:8px;">'
+            'color:#64748b;text-transform:uppercase;margin-bottom:10px;">'
             'Your secure code</div>'
             f'<div style="font-family:Consolas,Monaco,monospace;font-size:30px;'
             f'font-weight:700;letter-spacing:7px;color:#0f172a;">{escape(code)}</div>'
@@ -49,6 +53,8 @@ def _email_html(subject: str, body: str) -> str:
             'Expires in 15 minutes</div></div>'
         )
 
+    # The prose already includes the relevant "didn't request" warning. Keep
+    # a single generic footer instead of repeating the same warning.
     return f"""<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
@@ -66,7 +72,7 @@ def _email_html(subject: str, body: str) -> str:
           {content_html}
           {code_html}
           <div style="margin-top:26px;padding-top:18px;border-top:1px solid #e2e8f0;color:#64748b;font-size:12px;line-height:1.7;">
-            If you didn't request this message, you can safely ignore it. Never share a verification or recovery code with anyone.
+            NEXUS will never ask you to share your verification code with anyone.
           </div>
         </td></tr>
         <tr><td style="background:#f8fafc;padding:18px 32px;color:#64748b;font-size:12px;line-height:1.6;">
