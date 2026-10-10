@@ -51,7 +51,7 @@ def test_auth_email_has_plain_text_and_html_parts(monkeypatch):
     html = parts[1].get_content()
     assert "NEXUS" in html
     assert "ABC234" in html
-    assert "Never share a verification or recovery code" in html
+    assert html.count("verification or recovery code") == 1\n    assert "Your secure code" in html\n    assert "Expires in 15 minutes" in html\n    assert "This code expires in 15 minutes" not in html
 
 
 def test_auth_email_html_escapes_dynamic_content():
@@ -60,5 +60,5 @@ def test_auth_email_html_escapes_dynamic_content():
         "Hello <user@example.com>\n\nYour NEXUS verification code is: ABC234\n\nThis code expires in 15 minutes.",
     )
     assert "&lt;NEXUS&gt;" in html
-    assert "&lt;user@example.com>" not in html or "&lt;user@example.com&gt;" in html
+    assert "&lt;user@example.com&gt;" in html
     assert "<user@example.com>" not in html
