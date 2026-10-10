@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 
-const API = `${(import.meta.env.VITE_API_URL || "http://127.0.0.1:8000").replace(/\\/+$/, "")}/api/v1`;
+const API = `${(import.meta.env.VITE_API_URL || "http://127.0.0.1:8000").replace(/\/+$/, "")}/api/v1`;
 
 async function request(path, options = {}, token) {
   const response = await fetch(API + path, {
