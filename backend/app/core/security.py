@@ -1,4 +1,7 @@
 from datetime import UTC, datetime, timedelta
+import hashlib
+import hmac
+import secrets
 from uuid import UUID
 
 import jwt
@@ -8,6 +11,7 @@ from argon2.exceptions import VerificationError
 from app.core.config import settings
 
 _password_hasher = PasswordHasher()
+_VERIFICATION_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
 
 
 def hash_password(password: str) -> str:
@@ -21,15 +25,20 @@ def verify_password(plain_password: str, password_hash: str) -> bool:
         return False
 
 
-def create_access_token(subject: str | UUID, expires_delta: timedelta | None = None) -> str:
+def create_access_token(
+    subject: str | UUID,
+    expires_delta: timedelta | None = None,
+    *,
+    auth_version: int = 1,
+) -> str:
     issued_at = datetime.now(UTC)
     if expires_delta is None:
         expires_delta = timedelta(minutes=settings.access_token_expire_minutes)
-
     payload = {
         "sub": str(subject),
         "iat": int(issued_at.timestamp()),
         "exp": int((issued_at + expires_delta).timestamp()),
+        "ver": int(auth_version),
     }
     return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
@@ -46,9 +55,6 @@ def decode_access_token(token: str) -> dict:
         raise ValueError("Token has expired.") from exc
     except jwt.InvalidTokenError as exc:
         raise ValueError("Invalid token.") from exc
-
-import hashlib
-import secrets
 
 
 def create_auth_ticket(
@@ -98,5 +104,18 @@ def create_one_time_token() -> str:
     return secrets.token_urlsafe(32)
 
 
-def hash_one_time_token(token: str) -> str:
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+def create_verification_code(length: int = 6) -> str:
+    if length < 6 or length > 10:
+        raise ValueError("Verification code length must be between 6 and 10.")
+    return "".join(secrets.choice(_VERIFICATION_ALPHABET) for _ in range(length))
+
+
+def hash_one_time_token(token: str, *, context: str = "") -> str:
+    # Keyed HMAC prevents a database-only leak from enabling offline guessing
+    # of short verification codes. The context isolates accounts and purposes.
+    message = (context + "\0" + token).encode("utf-8")
+    return hmac.new(
+        settings.jwt_secret_key.encode("utf-8"),
+        message,
+        hashlib.sha256,
+    ).hexdigest()
