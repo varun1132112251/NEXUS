@@ -101,11 +101,12 @@ def _enforce_send_limit(db: Session, email: str, purpose: str) -> None:
 
 
 def _latest_token(db: Session, email: str, purpose: str) -> AuthToken | None:
-    # Include consumed rows so an older token can never revive.
+    # created_at can tie for rows inserted in one PostgreSQL transaction. UUID
+    # provides a deterministic tie-breaker; both columns are indexed/cheap.
     return db.scalar(
         select(AuthToken)
         .where(AuthToken.email == email, AuthToken.purpose == purpose)
-        .order_by(AuthToken.created_at.desc())
+        .order_by(AuthToken.created_at.desc(), AuthToken.id.desc())
         .limit(1)
         .with_for_update()
     )
@@ -240,6 +241,8 @@ def google_login(payload: GoogleLoginRequest, db: Session = Depends(get_db)) -> 
             return GoogleAuthResponse(requires_setup=False, access_token=create_access_token(user.id, auth_version=_auth_version(user)))
     user = db.scalar(select(User).where(User.email == email))
     if user:
+        if not user.email_verified:
+            raise HTTPException(status_code=409, detail="Verify this email with NEXUS before linking Google sign-in.")
         identity = AuthIdentity(user_id=user.id, provider="google", provider_subject=subject)
         user.email_verified = True
         db.add(identity)
