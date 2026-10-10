@@ -51,7 +51,7 @@ def test_auth_email_has_plain_text_and_html_parts(monkeypatch):
     html = parts[1].get_content()
     assert "NEXUS" in html
     assert "ABC234" in html
-    assert "Never share a verification code" in html
+    assert "Never share a verification or recovery code" in html
 
 
 def test_auth_email_html_escapes_dynamic_content():
