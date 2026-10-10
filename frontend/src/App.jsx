@@ -81,50 +81,73 @@ function Login({ onLogin }) {
   const [identifier, setIdentifier] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [code, setCode] = useState("");
   const [setupToken, setSetupToken] = useState("");
   const [setupName, setSetupName] = useState("");
+  const [setupProvider, setSetupProvider] = useState("email");
+  const [recoverySession, setRecoverySession] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 
   useEffect(() => {
-    if (!googleClientId || !window.google?.accounts?.id) return;
-    const button = document.getElementById("google-signin-button");
-    if (!button) return;
-    window.google.accounts.id.initialize({
-      client_id: googleClientId,
-      callback: handleGoogleCredential,
-    });
-    button.innerHTML = "";
-    window.google.accounts.id.renderButton(button, {
-      theme: "outline",
-      size: "large",
-      width: 426,
-      text: "continue_with",
-    });
+    if (!googleClientId) return undefined;
+    let attempts = 0;
+    let timer;
+    const renderButton = () => {
+      if (!window.google?.accounts?.id) return false;
+      const element = document.getElementById("google-signin-button");
+      if (!element) return false;
+      window.google.accounts.id.initialize({client_id: googleClientId, callback: handleGoogleCredential});
+      element.innerHTML = "";
+      window.google.accounts.id.renderButton(element, {theme:"outline", size:"large", width:326, text:"continue_with", shape:"rectangular"});
+      return true;
+    };
+    if (renderButton()) return undefined;
+    timer = window.setInterval(() => {
+      attempts += 1;
+      if (renderButton() || attempts >= 50) window.clearInterval(timer);
+    }, 100);
+    return () => window.clearInterval(timer);
   }, [googleClientId, mode]);
 
   async function handleGoogleCredential(response) {
     setBusy(true);
     setError("");
     try {
-      const data = await api("/auth/google", {
-        method: "POST",
-        body: JSON.stringify({ credential: response.credential }),
-      });
+      const data = await api("/auth/google", {method:"POST", body:JSON.stringify({credential:response.credential})});
       if (data.requires_setup) {
         setSetupToken(data.setup_token);
         setEmail(data.email || "");
         setSetupName(data.name || "");
+        setSetupProvider("google");
+        setUsername("");
+        setPassword("");
+        setConfirmPassword("");
         setMode("setup");
       } else {
         localStorage.setItem("nexus_token", data.access_token);
         onLogin(data.access_token);
       }
     } catch (err) {
-      setError(err.message);
+      setError(err.message || "Google sign-in failed. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function continueAfterRecovery() {
+    setBusy(true);
+    setError("");
+    try {
+      const data = await api("/auth/password-reset/continue", {
+        method:"POST", body:JSON.stringify({email:email.trim(), recovery_session:recoverySession})
+      });
+      localStorage.setItem("nexus_token", data.access_token);
+      onLogin(data.access_token);
+    } catch (err) {
+      setError(err.message || "Your recovery session expired. Request a new code.");
     } finally {
       setBusy(false);
     }
@@ -136,58 +159,56 @@ function Login({ onLogin }) {
     setError("");
     try {
       if (mode === "signup") {
-        await api("/auth/email/start", {
-          method: "POST",
-          body: JSON.stringify({ email: email.trim() }),
-        });
+        await api("/auth/email/start", {method:"POST", body:JSON.stringify({email:email.trim()})});
+        setCode("");
         setMode("verify");
       } else if (mode === "verify") {
-        const data = await api("/auth/email/verify", {
-          method: "POST",
-          body: JSON.stringify({ email: email.trim(), code: code.trim().toUpperCase() }),
-        });
+        const data = await api("/auth/email/verify", {method:"POST", body:JSON.stringify({email:email.trim(), code:code.trim().toUpperCase()})});
         if (data.access_token) {
           localStorage.setItem("nexus_token", data.access_token);
           onLogin(data.access_token);
         } else {
           setSetupToken(data.setup_token);
+          setSetupName(data.name || "");
+          setSetupProvider("email");
           setMode("setup");
         }
       } else if (mode === "setup") {
+        if (setupProvider !== "google" && password.length < 8) throw new Error("Password must contain at least 8 characters.");
+        if (password && password !== confirmPassword) throw new Error("Passwords do not match.");
+        if (setupProvider !== "google" && !password) throw new Error("A password is required.");
         const data = await api("/auth/setup", {
-          method: "POST",
-          body: JSON.stringify({
-            setup_token: setupToken,
-            username: username.trim(),
-            password,
-          }),
+          method:"POST",
+          body:JSON.stringify({setup_token:setupToken, username:username.trim(), ...(password ? {password} : {})})
         });
         localStorage.setItem("nexus_token", data.access_token);
         onLogin(data.access_token);
       } else if (mode === "forgot") {
-        await api("/auth/password-reset/start", {
-          method: "POST",
-          body: JSON.stringify({ email: email.trim() }),
-        });
+        await api("/auth/password-reset/start", {method:"POST", body:JSON.stringify({email:email.trim()})});
+        setCode("");
         setMode("reset");
       } else if (mode === "reset") {
+        const data = await api("/auth/password-reset/verify", {method:"POST", body:JSON.stringify({email:email.trim(), reset_token:code.trim().toUpperCase()})});
+        setRecoverySession(data.recovery_session);
+        setCode("");
+        setMode("recovery-choice");
+      } else if (mode === "reset-password") {
+        if (password.length < 8) throw new Error("Password must contain at least 8 characters.");
+        if (password !== confirmPassword) throw new Error("Passwords do not match.");
         const data = await api("/auth/password-reset/complete", {
-          method: "POST",
-          body: JSON.stringify({ email: email.trim(), reset_token: code.trim().toUpperCase(), password }),
+          method:"POST",
+          body:JSON.stringify({email:email.trim(), recovery_session:recoverySession, password})
         });
         localStorage.setItem("nexus_token", data.access_token);
         onLogin(data.access_token);
       } else {
         const key = identifier.includes("@") ? "email" : "username";
-        const data = await api("/auth/login", {
-          method: "POST",
-          body: JSON.stringify({ [key]: identifier.trim(), password }),
-        });
+        const data = await api("/auth/login", {method:"POST", body:JSON.stringify({[key]:identifier.trim(), password})});
         localStorage.setItem("nexus_token", data.access_token);
         onLogin(data.access_token);
       }
     } catch (err) {
-      setError(err.message);
+      setError(err.message || "Authentication failed. Please try again.");
     } finally {
       setBusy(false);
     }
@@ -197,16 +218,21 @@ function Login({ onLogin }) {
     setError("");
     setCode("");
     setPassword("");
+    setConfirmPassword("");
+    setSetupToken("");
+    setRecoverySession("");
     setMode(next);
   }
 
   const titles = {
-    signin: ["Welcome back.", "Sign in to your NEXUS account."],
-    signup: ["Create your operating account.", "Verify your email first. Then choose your NEXUS credentials."],
-    verify: ["Check your email.", `Enter the 6-character verification code sent to ${email}.`],
-    setup: ["Finish your NEXUS account.", "Your identity is verified. Choose your NEXUS username and password."],
-    forgot: ["Reset your password.", "We'll send a recovery code to your verified email."],
-    reset: ["Create a new password.", `Enter the recovery code sent to ${email}.`],
+    signin:["Welcome back.","Sign in to your NEXUS account."],
+    signup:["Create your operating account.","Start with your email. We will verify it before account setup."],
+    verify:["Check your email.","Enter the 6-character verification code sent to " + email + "."],
+    setup:["Finish your NEXUS account.", setupProvider === "google" ? "Your Google identity is verified. Choose a NEXUS username; password is optional." : "Your email is verified. Choose your username and password."],
+    forgot:["Recover your account.","Enter your registered email to request a recovery code."],
+    reset:["Verify account ownership.","Enter the recovery code sent to " + email + "."],
+    "recovery-choice":["Email verified.","Choose whether to change your password or continue without changing it."],
+    "reset-password":["Create a new password.","Choose a replacement password."],
   };
   const [title, subtitle] = titles[mode];
 
@@ -216,48 +242,52 @@ function Login({ onLogin }) {
       <p className="eyebrow">PERSONAL OPERATING SYSTEM</p>
       <h1>NEXUS</h1>
       <p className="muted">{title}</p>
-
-      {(mode === "signin" || mode === "signup") && googleClientId && (
-        <>
-          <div id="google-signin-button" className="google-auth-button" />
-          <div className="auth-divider"><span>or</span></div>
-        </>
-      )}
-
-      <form onSubmit={submit}>
+      {(mode === "signin" || mode === "signup") && googleClientId && <>
+        <div id="google-signin-button" className="google-auth-button" aria-label="Continue with Google" />
+        <div className="auth-divider"><span>or</span></div>
+      </>}
+      {mode !== "recovery-choice" && <form onSubmit={submit}>
         {mode === "signin" && <>
-          <label>Username or email<input value={identifier} onChange={e => setIdentifier(e.target.value)} required /></label>
-          <label>Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} minLength={8} required /></label>
+          <label>Username or email<input autoComplete="username" value={identifier} onChange={e=>setIdentifier(e.target.value)} required /></label>
+          <label>Password<input type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} minLength={8} maxLength={128} required /></label>
         </>}
-        {mode === "signup" && <label>Email<input type="email" value={email} onChange={e => setEmail(e.target.value)} required /></label>}
-        {mode === "verify" && <label>Verification code<input value={code} onChange={e => setCode(e.target.value)} inputMode="text" maxLength={6} required /></label>}
+        {mode === "signup" && <label>Email<input type="email" autoComplete="email" value={email} onChange={e=>setEmail(e.target.value)} required maxLength={255}/></label>}
+        {mode === "verify" && <label>Verification code<input value={code} onChange={e=>setCode(e.target.value)} autoCapitalize="characters" inputMode="text" minLength={6} maxLength={10} required /></label>}
         {mode === "setup" && <>
-          <label>Verified email<input value={email} disabled /></label>
-          <label>Username<input value={username} onChange={e => setUsername(e.target.value)} required /></label>
-          <label>Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} minLength={8} required /></label>
+          <label>Verified email<input type="email" value={email} disabled /></label>
+          <label>Username<input autoComplete="username" value={username} onChange={e=>setUsername(e.target.value)} minLength={3} maxLength={32} required /></label>
+          {setupProvider !== "google" && <>
+            <label>Password<input type="password" autoComplete="new-password" value={password} onChange={e=>setPassword(e.target.value)} minLength={8} maxLength={128} required /></label>
+            <label>Confirm password<input type="password" autoComplete="new-password" value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)} minLength={8} maxLength={128} required /></label>
+          </>}
+          {setupProvider === "google" && <>
+            <label>Set a NEXUS password (optional)<input type="password" autoComplete="new-password" value={password} onChange={e=>setPassword(e.target.value)} minLength={password ? 8 : undefined} maxLength={128} /></label>
+            {password && <label>Confirm password<input type="password" autoComplete="new-password" value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)} minLength={8} maxLength={128} required /></label>}
+          </>}
+          {setupName && <p className="muted small">Google profile: {setupName}</p>}
         </>}
-        {mode === "forgot" && <label>Verified email<input type="email" value={email} onChange={e => setEmail(e.target.value)} required /></label>}
-        {mode === "reset" && <>
-          <label>Recovery code<input value={code} onChange={e => setCode(e.target.value)} inputMode="text" maxLength={6} required /></label>
-          <label>New password<input type="password" value={password} onChange={e => setPassword(e.target.value)} minLength={8} required /></label>
+        {mode === "forgot" && <label>Email<input type="email" autoComplete="email" value={email} onChange={e=>setEmail(e.target.value)} required maxLength={255}/></label>}
+        {mode === "reset" && <label>Recovery code<input value={code} onChange={e=>setCode(e.target.value)} autoCapitalize="characters" inputMode="text" minLength={6} maxLength={10} required /></label>}
+        {mode === "reset-password" && <>
+          <label>New password<input type="password" autoComplete="new-password" value={password} onChange={e=>setPassword(e.target.value)} minLength={8} maxLength={128} required /></label>
+          <label>Confirm new password<input type="password" autoComplete="new-password" value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)} minLength={8} maxLength={128} required /></label>
         </>}
-        {error && <div className="error">{error}</div>}
+        {error && <div className="error" role="alert">{error}</div>}
         <button className="primary full" disabled={busy}>
-          {busy ? "Working…" :
-            mode === "signin" ? "Enter NEXUS" :
-            mode === "signup" ? "Send verification code" :
-            mode === "verify" ? "Verify email" :
-            mode === "setup" ? "Create NEXUS account" :
-            mode === "forgot" ? "Send recovery code" : "Reset password"}
+          {busy ? "Working…" : mode==="signin" ? "Enter NEXUS" : mode==="signup" ? "Send verification code" : mode==="verify" ? "Verify email" : mode==="setup" ? "Create NEXUS account" : mode==="forgot" ? "Send recovery code" : mode==="reset" ? "Verify recovery code" : mode==="reset-password" ? "Change password and continue" : "Continue"}
         </button>
-      </form>
-
-      {mode === "signin" && <div className="auth-links">
-        <button className="auth-switch" type="button" onClick={() => switchMode("forgot")}>Forgot password?</button>
-        <button className="auth-switch" type="button" onClick={() => switchMode("signup")}>New to NEXUS? Create an account</button>
+      </form>}
+      {mode === "recovery-choice" && <div className="form-grid">
+        <button className="primary full" type="button" disabled={busy} onClick={()=>{setError("");setPassword("");setConfirmPassword("");setMode("reset-password");}}>Change password</button>
+        <button className="ghost full" type="button" disabled={busy} onClick={continueAfterRecovery}>Continue without changing password</button>
+        {error && <div className="error" role="alert">{error}</div>}
       </div>}
-      {mode === "signup" && <button className="auth-switch" type="button" onClick={() => switchMode("signin")}>Already have an account? Sign in</button>}
-      {(mode === "verify" || mode === "setup" || mode === "forgot" || mode === "reset") && <button className="auth-switch" type="button" onClick={() => switchMode("signin")}>Back to sign in</button>}
+      {mode === "signin" && <div className="auth-links">
+        <button className="auth-switch" type="button" onClick={()=>switchMode("forgot")}>Forgot password?</button>
+        <button className="auth-switch" type="button" onClick={()=>switchMode("signup")}>New to NEXUS? Create an account</button>
+      </div>}
+      {mode === "signup" && <button className="auth-switch" type="button" onClick={()=>switchMode("signin")}>Already have an account? Sign in</button>}
+      {(mode==="verify" || mode==="setup" || mode==="forgot" || mode==="reset" || mode==="recovery-choice" || mode==="reset-password") && <button className="auth-switch" type="button" onClick={()=>switchMode("signin")}>Back to sign in</button>}
       {mode !== "signin" && mode !== "signup" && <p className="muted small">{subtitle}</p>}
     </section>
   </main>;
