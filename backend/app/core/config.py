@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     app_name: str = "NEXUS API"
     environment: str = "local"
     debug: bool = False
+    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     database_url: str = "postgresql+psycopg://nexus:nexus@localhost:5432/nexus"
     jwt_secret_key: str
     jwt_algorithm: str = "HS256"
