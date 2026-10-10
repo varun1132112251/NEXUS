@@ -150,8 +150,13 @@ def get_current_user(
 @router.post("/login", response_model=Token)
 def login(payload: LoginRequest, db: Session = Depends(get_db)) -> Token:
     identifier = payload.identifier
-    user = db.scalar(select(User).where((User.username == identifier) | (User.email == identifier.lower())))
-    rate_key = user.email if user is not None else identifier.lower()
+    user = db.scalar(
+        select(User).where((User.username == identifier) | (User.email == identifier.lower()))
+    )
+    # Rate-limit on the supplied identifier, not a resolved account email. This
+    # prevents alternate identifiers from bypassing the same login bucket and
+    # avoids exposing whether an account exists through the limit response.
+    rate_key = identifier.strip().lower()
     _check_login_limit(db, rate_key)
     if user is None or not user.email_verified or not verify_password(payload.password, user.password_hash):
         _record_login_failure(db, rate_key)
