@@ -178,8 +178,9 @@ def start_email_verification(payload: EmailStartRequest, db: Session = Depends(g
     try:
         send_auth_email(
             email,
-            "Verify your NEXUS email",
-            f"Your NEXUS verification code is: {code}\n\nThis code expires in 15 minutes.",
+            "Verify your email address — NEXUS",
+            "Hello,\n\nWelcome to NEXUS — your personalized operating system for goals, routines, and productivity.\n\nTo complete your registration, enter the verification code below on the NEXUS registration page.\n\n"
+            + f"Your NEXUS verification code is: {code}\n\nThis code expires in 15 minutes.\n\nIf you did not request this code, you can safely ignore this email. Never share your verification code with anyone.",
         )
     except Exception as exc:
         logger.exception("Failed to deliver NEXUS email verification.")
@@ -308,8 +309,9 @@ def start_password_reset(payload: PasswordResetStartRequest, db: Session = Depen
         db.commit()
         try:
             send_auth_email(
-                user.email, "Reset your NEXUS password",
-                f"Your NEXUS password reset code is: {code}\n\nThis code expires in 15 minutes.",
+                user.email, "Reset your NEXUS password — NEXUS",
+                "Hello,\n\nWe received a request to recover your NEXUS account. Use the code below to continue with password recovery.\n\n"
+                + f"Your NEXUS password reset code is: {code}\n\nThis code expires in 15 minutes.\n\nIf you did not request a password reset, you can safely ignore this email. Never share your recovery code with anyone.",
             )
         except Exception:
             logger.exception("Failed to deliver NEXUS password-reset email.")
