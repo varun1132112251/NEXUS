@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 
-const API = "http://127.0.0.1:8000/api/v1";
+const API = `${(import.meta.env.VITE_API_URL || "http://127.0.0.1:8000").replace(/\\/+$/, "")}/api/v1`;
 
 async function request(path, options = {}, token) {
   const response = await fetch(API + path, {
@@ -13,7 +13,13 @@ async function request(path, options = {}, token) {
   });
   const data = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(data?.detail || `Request failed (${response.status})`);
+    const detail = data?.detail;
+    const message = Array.isArray(detail)
+      ? detail.map((item) => item?.msg || "Invalid input").join(" ")
+      : typeof detail === "string"
+        ? detail
+        : `Request failed (${response.status})`;
+    throw new Error(message);
   }
   return data;
 }
