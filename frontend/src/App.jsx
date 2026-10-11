@@ -14,7 +14,15 @@ function api(path, options = {}, token) {
     },
   }).then(async (r) => {
     const data = await r.json().catch(() => null);
-    if (!r.ok) throw new Error(data?.detail || `Request failed (${r.status})`);
+    if (!r.ok) {
+      const detail = data?.detail;
+      const message = Array.isArray(detail)
+        ? detail.map((item) => item?.msg || "Invalid input").join(" ")
+        : typeof detail === "string"
+          ? detail
+          : `Request failed (${r.status})`;
+      throw new Error(message);
+    }
     return data;
   });
 }
@@ -89,6 +97,7 @@ function Login({ onLogin }) {
   const [recoverySession, setRecoverySession] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 
   useEffect(() => {
@@ -137,9 +146,28 @@ function Login({ onLogin }) {
     }
   }
 
+  async function resendVerificationCode() {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      await api("/auth/email/start", {
+        method: "POST",
+        body: JSON.stringify({ email: email.trim() }),
+      });
+      setCode("");
+      setNotice("A new code was requested. Check your inbox and Spam folder. Only the newest code will work.");
+    } catch (err) {
+      setError(err.message || "Could not resend the code. Please try again later.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function continueAfterRecovery() {
     setBusy(true);
     setError("");
+    setNotice("");
     try {
       const data = await api("/auth/password-reset/continue", {
         method:"POST", body:JSON.stringify({email:email.trim(), recovery_session:recoverySession})
@@ -157,10 +185,12 @@ function Login({ onLogin }) {
     e.preventDefault();
     setBusy(true);
     setError("");
+    setNotice("");
     try {
       if (mode === "signup") {
         await api("/auth/email/start", {method:"POST", body:JSON.stringify({email:email.trim()})});
         setCode("");
+        setNotice("If the address can be used for authentication, a verification email has been sent. Check your inbox and Spam folder.");
         setMode("verify");
       } else if (mode === "verify") {
         const data = await api("/auth/email/verify", {method:"POST", body:JSON.stringify({email:email.trim(), code:code.trim().toUpperCase()})});
@@ -203,7 +233,8 @@ function Login({ onLogin }) {
         onLogin(data.access_token);
       } else {
         const key = identifier.includes("@") ? "email" : "username";
-        const data = await api("/auth/login", {method:"POST", body:JSON.stringify({[key]:identifier.trim(), password})});
+        const normalizedIdentifier = key === "email" ? identifier.trim().toLowerCase() : identifier.trim();
+        const data = await api("/auth/login", {method:"POST", body:JSON.stringify({[key]:normalizedIdentifier, password})});
         localStorage.setItem("nexus_token", data.access_token);
         onLogin(data.access_token);
       }
@@ -216,6 +247,7 @@ function Login({ onLogin }) {
 
   function switchMode(next) {
     setError("");
+    setNotice("");
     setCode("");
     setPassword("");
     setConfirmPassword("");
@@ -242,17 +274,21 @@ function Login({ onLogin }) {
       <p className="eyebrow">PERSONAL OPERATING SYSTEM</p>
       <h1>NEXUS</h1>
       <p className="muted">{title}</p>
-      {(mode === "signin" || mode === "signup") && googleClientId && <>
-        <div id="google-signin-button" className="google-auth-button" aria-label="Continue with Google" />
+      {(mode === "signin" || mode === "signup") && <>
+        {googleClientId ? <div id="google-signin-button" className="google-auth-button" aria-label="Continue with Google" /> : <button type="button" className="google-fallback-button" onClick={() => setError("Google sign-in is not configured yet. Add VITE_GOOGLE_CLIENT_ID in Vercel and GOOGLE_CLIENT_ID in Render.")}>Continue with Google</button>}
         <div className="auth-divider"><span>or</span></div>
       </>}
+      {notice && <div className="notice" role="status">{notice}</div>}
       {mode !== "recovery-choice" && <form onSubmit={submit}>
         {mode === "signin" && <>
           <label>Username or email<input autoComplete="username" value={identifier} onChange={e=>setIdentifier(e.target.value)} required /></label>
           <label>Password<input type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} minLength={8} maxLength={128} required /></label>
         </>}
         {mode === "signup" && <label>Email<input type="email" autoComplete="email" value={email} onChange={e=>setEmail(e.target.value)} required maxLength={255}/></label>}
-        {mode === "verify" && <label>Verification code<input value={code} onChange={e=>setCode(e.target.value)} autoCapitalize="characters" inputMode="text" minLength={6} maxLength={10} required /></label>}
+        {mode === "verify" && <>
+          <label>Verification code<input value={code} onChange={e=>setCode(e.target.value.toUpperCase().replace(/\s/g, ""))} autoCapitalize="characters" autoComplete="one-time-code" inputMode="text" minLength={6} maxLength={10} required /></label>
+          <p className="muted small auth-help">Use the newest 6-character code. Codes expire after 15 minutes; check Spam if it is not in your inbox.</p>
+        </>}
         {mode === "setup" && <>
           <label>Verified email<input type="email" value={email} disabled /></label>
           <label>Username<input autoComplete="username" value={username} onChange={e=>setUsername(e.target.value)} minLength={3} maxLength={32} required /></label>
@@ -287,6 +323,7 @@ function Login({ onLogin }) {
         <button className="auth-switch" type="button" onClick={()=>switchMode("signup")}>New to NEXUS? Create an account</button>
       </div>}
       {mode === "signup" && <button className="auth-switch" type="button" onClick={()=>switchMode("signin")}>Already have an account? Sign in</button>}
+      {mode === "verify" && <button className="auth-switch" type="button" disabled={busy} onClick={resendVerificationCode}>{busy ? "Working…" : "Didn't receive a code? Resend email"}</button>}
       {(mode==="verify" || mode==="setup" || mode==="forgot" || mode==="reset" || mode==="recovery-choice" || mode==="reset-password") && <button className="auth-switch" type="button" onClick={()=>switchMode("signin")}>Back to sign in</button>}
       {mode !== "signin" && mode !== "signup" && <p className="muted small">{subtitle}</p>}
     </section>
@@ -333,8 +370,8 @@ function App() {
 
   if (!token) return <Login onLogin={setToken} />;
   if (checkingProfile) return <div className="loading">Loading NEXUS<span>•</span><span>•</span><span>•</span></div>;
-  if (!profile?.onboarding_completed) {
-    return <ProfileOnboarding token={token} onComplete={setProfile} />;
+  if (profile && !profile.onboarding_completed) {
+    return <ProfileOnboarding token={token} onComplete={setProfile} initialProfile={profile} />;
   }
 
   return <Dashboard token={token} onLogout={logout} />;

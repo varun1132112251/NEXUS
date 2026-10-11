@@ -1,6 +1,6 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 
-const API = "http://127.0.0.1:8000/api/v1";
+const API = `${(import.meta.env.VITE_API_URL || "http://127.0.0.1:8000").replace(/\/+$/, "")}/api/v1`;
 
 async function request(path, options = {}, token) {
   const response = await fetch(API + path, {
@@ -13,7 +13,13 @@ async function request(path, options = {}, token) {
   });
   const data = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(data?.detail || `Request failed (${response.status})`);
+    const detail = data?.detail;
+    const message = Array.isArray(detail)
+      ? detail.map((item) => item?.msg || "Invalid input").join(" ")
+      : typeof detail === "string"
+        ? detail
+        : `Request failed (${response.status})`;
+    throw new Error(message);
   }
   return data;
 }
@@ -33,9 +39,23 @@ const INITIAL_FORM = {
   planningStyle: "focused",
 };
 
-export default function ProfileOnboarding({ token, onComplete }) {
+export default function ProfileOnboarding({ token, onComplete, initialProfile }) {
   const [step, setStep] = useState(1);
-  const [form, setForm] = useState(INITIAL_FORM);
+  const [form, setForm] = useState(() => ({
+    ...INITIAL_FORM,
+    name: initialProfile?.name || "",
+    college: initialProfile?.college || "",
+    degree: initialProfile?.degree || "B.Tech",
+    branch: initialProfile?.branch || "",
+    year: initialProfile?.year ? String(initialProfile.year) : "",
+    semester: initialProfile?.semester ? String(initialProfile.semester) : "",
+    timezone: initialProfile?.timezone || INITIAL_FORM.timezone,
+    weekdayStart: initialProfile?.availability?.weekday?.start || INITIAL_FORM.weekdayStart,
+    weekdayEnd: initialProfile?.availability?.weekday?.end || INITIAL_FORM.weekdayEnd,
+    weekendStart: initialProfile?.availability?.weekend?.start || INITIAL_FORM.weekendStart,
+    weekendEnd: initialProfile?.availability?.weekend?.end || INITIAL_FORM.weekendEnd,
+    planningStyle: initialProfile?.preferences?.planning_style || INITIAL_FORM.planningStyle,
+  }));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 

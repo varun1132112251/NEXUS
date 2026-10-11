@@ -101,11 +101,12 @@ def _enforce_send_limit(db: Session, email: str, purpose: str) -> None:
 
 
 def _latest_token(db: Session, email: str, purpose: str) -> AuthToken | None:
-    # Include consumed rows so an older token can never revive.
+    # created_at can tie for rows inserted in one PostgreSQL transaction. UUID
+    # provides a deterministic tie-breaker; both columns are indexed/cheap.
     return db.scalar(
         select(AuthToken)
         .where(AuthToken.email == email, AuthToken.purpose == purpose)
-        .order_by(AuthToken.created_at.desc())
+        .order_by(AuthToken.created_at.desc(), AuthToken.id.desc())
         .limit(1)
         .with_for_update()
     )
@@ -148,8 +149,9 @@ def get_current_user(
 
 @router.post("/login", response_model=Token)
 def login(payload: LoginRequest, db: Session = Depends(get_db)) -> Token:
-    identifier = payload.identifier
-    user = db.scalar(select(User).where((User.username == identifier) | (User.email == identifier.lower())))
+    identifier = payload.identifier.strip()
+    email_identifier = identifier.lower()
+    user = db.scalar(select(User).where((User.username == identifier) | (User.email == email_identifier)))
     rate_key = user.email if user is not None else identifier.lower()
     _check_login_limit(db, rate_key)
     if user is None or not user.email_verified or not verify_password(payload.password, user.password_hash):
@@ -160,7 +162,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> Token:
 
 @router.post("/email/start", response_model=dict)
 def start_email_verification(payload: EmailStartRequest, db: Session = Depends(get_db)) -> dict:
-    email = str(payload.email)
+    email = str(payload.email).strip().lower()
     existing = db.scalar(select(User).where(User.email == email))
     if existing and existing.email_verified:
         raise HTTPException(status_code=409, detail="An account already exists for this email. Sign in instead.")
@@ -178,8 +180,9 @@ def start_email_verification(payload: EmailStartRequest, db: Session = Depends(g
     try:
         send_auth_email(
             email,
-            "Verify your NEXUS email",
-            f"Your NEXUS verification code is: {code}\n\nThis code expires in 15 minutes.",
+            "Verify your email address — NEXUS",
+            "Hello,\n\nWelcome to NEXUS — your personalized operating system for goals, routines, and productivity.\n\nTo complete your registration, enter the verification code below on the NEXUS registration page.\n\n"
+            + f"Your NEXUS verification code is: {code}\n\nThis code expires in 15 minutes.\n\nIf you did not request this code, you can safely ignore this email. Never share your verification code with anyone.",
         )
     except Exception as exc:
         logger.exception("Failed to deliver NEXUS email verification.")
@@ -191,7 +194,7 @@ def start_email_verification(payload: EmailStartRequest, db: Session = Depends(g
 
 @router.post("/email/verify")
 def verify_email(payload: EmailVerifyRequest, db: Session = Depends(get_db)):
-    email = str(payload.email)
+    email = str(payload.email).strip().lower()
     token = _latest_token(db, email, "email_verification")
     now = datetime.now(UTC)
     valid = (
@@ -239,6 +242,8 @@ def google_login(payload: GoogleLoginRequest, db: Session = Depends(get_db)) -> 
             return GoogleAuthResponse(requires_setup=False, access_token=create_access_token(user.id, auth_version=_auth_version(user)))
     user = db.scalar(select(User).where(User.email == email))
     if user:
+        if not user.email_verified:
+            raise HTTPException(status_code=409, detail="Verify this email with NEXUS before linking Google sign-in.")
         identity = AuthIdentity(user_id=user.id, provider="google", provider_subject=subject)
         user.email_verified = True
         db.add(identity)
@@ -293,7 +298,7 @@ def complete_account_setup(payload: AccountSetupRequest, db: Session = Depends(g
 
 @router.post("/password-reset/start", response_model=dict)
 def start_password_reset(payload: PasswordResetStartRequest, db: Session = Depends(get_db)) -> dict:
-    email = str(payload.email)
+    email = str(payload.email).strip().lower()
     _enforce_send_limit(db, email, "password_reset_start_limit")
     user = db.scalar(select(User).where(User.email == email, User.email_verified.is_(True)))
     if user:
@@ -308,19 +313,24 @@ def start_password_reset(payload: PasswordResetStartRequest, db: Session = Depen
         db.commit()
         try:
             send_auth_email(
-                user.email, "Reset your NEXUS password",
-                f"Your NEXUS password reset code is: {code}\n\nThis code expires in 15 minutes.",
+                user.email, "Reset your NEXUS password — NEXUS",
+                "Hello,\n\nWe received a request to recover your NEXUS account. Use the code below to continue with password recovery.\n\n"
+                + f"Your NEXUS password reset code is: {code}\n\nThis code expires in 15 minutes.\n\nIf you did not request a password reset, you can safely ignore this email. Never share your recovery code with anyone.",
             )
-        except Exception:
+        except Exception as exc:
             logger.exception("Failed to deliver NEXUS password-reset email.")
             token.consumed_at = datetime.now(UTC)
             db.commit()
+            raise HTTPException(
+                status_code=503,
+                detail="We could not send the recovery email right now. Please try again later.",
+            ) from exc
     return {"message": "If an account exists for this email, a reset message has been sent."}
 
 
 @router.post("/password-reset/verify", response_model=dict)
 def verify_password_reset(payload: PasswordResetVerifyRequest, db: Session = Depends(get_db)) -> dict:
-    email = str(payload.email)
+    email = str(payload.email).strip().lower()
     token = _latest_token(db, email, "password_reset")
     now = datetime.now(UTC)
     valid = (
@@ -354,7 +364,7 @@ def verify_password_reset(payload: PasswordResetVerifyRequest, db: Session = Dep
 
 
 def _consume_recovery_session(payload: PasswordRecoverySessionRequest, db: Session) -> User:
-    email = str(payload.email)
+    email = str(payload.email).strip().lower()
     token = _latest_token(db, email, "password_reset_session")
     now = datetime.now(UTC)
     valid = (

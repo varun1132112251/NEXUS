@@ -14,6 +14,20 @@ permissions:
 jobs:
   backend-tests:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: nexus
+          POSTGRES_PASSWORD: nexus_ci_password
+          POSTGRES_DB: nexus
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nexus -d nexus"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     defaults:
       run:
         working-directory: backend
@@ -21,6 +35,7 @@ jobs:
       JWT_SECRET_KEY: ci-only-secret-for-tests-not-for-production
       ENVIRONMENT: test
       DEBUG: "false"
+      DATABASE_URL: postgresql+psycopg://nexus:nexus_ci_password@localhost:5432/nexus
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -30,6 +45,8 @@ jobs:
           cache-dependency-path: backend/pyproject.toml
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e ".[dev]"
+      - name: Apply migrations to a fresh PostgreSQL database
+        run: alembic upgrade head
       - run: pytest
   frontend-build:
     runs-on: ubuntu-latest

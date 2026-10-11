@@ -74,3 +74,33 @@ nav button{border:0;background:transparent;text-align:left;width:100%;padding:11
   display: grid;
   gap: 4px;
 }
+
+
+/* Authentication feedback and recovery helpers */
+.notice {
+  margin: 16px 0 0;
+  padding: 12px 14px;
+  border: 1px solid #3c5130;
+  border-radius: 10px;
+  background: #121b10;
+  color: #c8e9a0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.auth-help {
+  margin: -6px 0 0;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.auth-switch:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+.login-card button:focus-visible,
+.onboarding-card button:focus-visible,
+.login-card input:focus-visible,
+.onboarding-card input:focus-visible,
+.onboarding-card select:focus-visible {
+  outline: 2px solid #d7ff48;
+  outline-offset: 3px;
+}
