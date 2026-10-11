@@ -8,7 +8,7 @@ def test_auth_email_has_plain_text_and_html_parts(monkeypatch):
         def __init__(self, host, port, timeout):
             assert host == "smtp.example.test"
             assert port == 587
-            assert timeout == 10
+            assert timeout == 25
 
         def __enter__(self):
             return self
