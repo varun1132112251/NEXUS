@@ -1,7 +1,10 @@
+import json
 import logging
 import os
 import re
 import smtplib
+import urllib.error
+import urllib.request
 from email.message import EmailMessage
 from html import escape
 import resend
@@ -89,6 +92,37 @@ def _email_html(subject: str, body: str) -> str:
 
 
 def send_auth_email(to_email: str, subject: str, body: str) -> None:
+    # Prefer Brevo's HTTPS API: some hosting providers restrict outbound SMTP.
+    brevo_api_key = os.getenv("BREVO_API_KEY")
+    if brevo_api_key:
+        sender_email = settings.smtp_from or os.getenv("EMAIL_FROM")
+        if not sender_email:
+            raise RuntimeError("SMTP_FROM or EMAIL_FROM must be configured as a verified Brevo sender.")
+        payload = {
+            "sender": {"name": "NEXUS", "email": sender_email},
+            "to": [{"email": to_email.strip().lower()}],
+            "subject": subject,
+            "textContent": body,
+            "htmlContent": _email_html(subject, body),
+        }
+        request = urllib.request.Request(
+            "https://api.brevo.com/v3/smtp/email",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "accept": "application/json",
+                "api-key": brevo_api_key,
+                "content-type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:
+                logger.info("BREVO_API_ACCEPTED auth email to %s status=%s", to_email.strip().lower(), response.status)
+        except (urllib.error.URLError, urllib.error.HTTPError):
+            logger.exception("BREVO_API_DELIVERY_FAILED for %s", to_email.strip().lower())
+            raise
+        return
+
     # Prefer Brevo SMTP when configured. This lets deployments migrate away from
     # Resend without having to remove the old key until delivery is verified.
     if settings.smtp_host and settings.smtp_username and settings.smtp_password:
