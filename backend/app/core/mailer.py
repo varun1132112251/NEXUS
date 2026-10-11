@@ -1,12 +1,10 @@
-import json
 import logging
 import os
 import re
 import smtplib
 from email.message import EmailMessage
 from html import escape
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+import resend
 
 from app.core.config import settings
 
@@ -91,7 +89,8 @@ def _email_html(subject: str, body: str) -> str:
 
 
 def send_auth_email(to_email: str, subject: str, body: str) -> None:
-    # Prefer Resend's HTTPS API, avoiding blocked outbound SMTP connections.
+    # Prefer Resend's official Python SDK. It supplies a standard SDK User-Agent,
+    # unlike the previous raw urllib request that was rejected with Cloudflare 1010.
     resend_api_key = os.getenv("RESEND_API_KEY")
     email_from = os.getenv("EMAIL_FROM")
 
@@ -99,43 +98,20 @@ def send_auth_email(to_email: str, subject: str, body: str) -> None:
         if not email_from:
             raise RuntimeError("EMAIL_FROM must be configured when Resend is enabled.")
 
-        payload = {
-            "from": email_from,
-            "to": [to_email],
-            "subject": subject,
-            "text": body,
-            "html": _email_html(subject, body),
-        }
-        request = Request(
-            "https://api.resend.com/emails",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {resend_api_key}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
-
+        resend.api_key = resend_api_key
         try:
-            with urlopen(request, timeout=15) as response:
-                response_body = response.read().decode("utf-8", errors="replace")
-                if not 200 <= response.status < 300:
-                    raise RuntimeError(f"Resend returned HTTP {response.status}.")
-                logger.info("RESEND_ACCEPTED auth email to %s: %s", to_email, response_body)
-            return
-        except HTTPError as exc:
-            error_detail = exc.read().decode("utf-8", errors="replace")
-            logger.error(
-                "Resend email request failed with HTTP %s: %s",
-                exc.code,
-                error_detail,
-            )
-            raise RuntimeError(
-                f"Resend rejected the email request (HTTP {exc.code}): {error_detail}"
-            ) from exc
-        except URLError as exc:
-            logger.error("Could not connect to Resend: %s", exc.reason)
-            raise RuntimeError("Could not connect to the Resend email service.") from exc
+            result = resend.Emails.send({
+                "from": email_from,
+                "to": [to_email],
+                "subject": subject,
+                "text": body,
+                "html": _email_html(subject, body),
+            })
+            logger.info("RESEND_ACCEPTED auth email to %s: %s", to_email, result)
+        except Exception:
+            logger.exception("Resend SDK failed to send auth email to %s.", to_email)
+            raise
+        return
 
     # Existing SMTP fallback for environments where SMTP is reachable.
     if settings.smtp_host:
