@@ -26,6 +26,21 @@ def get_profile(
         db.add(profile)
         db.commit()
         db.refresh(profile)
+    if (
+        not profile.onboarding_completed
+        and profile.name
+        and profile.college
+        and profile.degree
+        and profile.branch
+        and profile.year
+        and profile.semester
+        and profile.availability
+        and profile.preferences
+    ):
+        profile.onboarding_completed = True
+        db.commit()
+        db.refresh(profile)
+        logger.info("Auto-recovered completed legacy profile for user_id=%s", current_user.id)
     logger.info("Profile read for user_id=%s onboarding_completed=%s", current_user.id, profile.onboarding_completed)
     return profile
 
