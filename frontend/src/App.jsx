@@ -274,8 +274,8 @@ function Login({ onLogin }) {
       <p className="eyebrow">PERSONAL OPERATING SYSTEM</p>
       <h1>NEXUS</h1>
       <p className="muted">{title}</p>
-      {(mode === "signin" || mode === "signup") && googleClientId && <>
-        <div id="google-signin-button" className="google-auth-button" aria-label="Continue with Google" />
+      {(mode === "signin" || mode === "signup") && <>
+        {googleClientId ? <div id="google-signin-button" className="google-auth-button" aria-label="Continue with Google" /> : <button type="button" className="google-fallback-button" onClick={() => setError("Google sign-in is not configured yet. Add VITE_GOOGLE_CLIENT_ID in Vercel and GOOGLE_CLIENT_ID in Render.")}>Continue with Google</button>}
         <div className="auth-divider"><span>or</span></div>
       </>}
       {notice && <div className="notice" role="status">{notice}</div>}
