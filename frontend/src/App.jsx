@@ -233,7 +233,8 @@ function Login({ onLogin }) {
         onLogin(data.access_token);
       } else {
         const key = identifier.includes("@") ? "email" : "username";
-        const data = await api("/auth/login", {method:"POST", body:JSON.stringify({[key]:identifier.trim(), password})});
+        const normalizedIdentifier = key === "email" ? identifier.trim().toLowerCase() : identifier.trim();
+        const data = await api("/auth/login", {method:"POST", body:JSON.stringify({[key]:normalizedIdentifier, password})});
         localStorage.setItem("nexus_token", data.access_token);
         onLogin(data.access_token);
       }
@@ -369,7 +370,7 @@ function App() {
 
   if (!token) return <Login onLogin={setToken} />;
   if (checkingProfile) return <div className="loading">Loading NEXUS<span>•</span><span>•</span><span>•</span></div>;
-  if (!profile?.onboarding_completed) {
+  if (profile && !profile.onboarding_completed) {
     return <ProfileOnboarding token={token} onComplete={setProfile} initialProfile={profile} />;
   }
 
