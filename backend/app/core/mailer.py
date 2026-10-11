@@ -102,7 +102,7 @@ def send_auth_email(to_email: str, subject: str, body: str) -> None:
         try:
             result = resend.Emails.send({
                 "from": email_from,
-                "to": [to_email],
+                "to": [to_email.strip().lower()],
                 "subject": subject,
                 "text": body,
                 "html": _email_html(subject, body),
