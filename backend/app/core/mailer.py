@@ -1,6 +1,10 @@
 import logging
 import re
 import smtplib
+import json
+import os
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 from email.message import EmailMessage
 from html import escape
 
@@ -87,26 +91,97 @@ def _email_html(subject: str, body: str) -> str:
 
 
 def send_auth_email(to_email: str, subject: str, body: str) -> None:
+    # Prefer Resend's HTTPS API on deployed environments.
+    resend_api_key = os.getenv("RESEND_API_KEY")
+    email_from = os.getenv("EMAIL_FROM")
+
+    if resend_api_key:
+        if not email_from:
+            raise RuntimeError(
+                "EMAIL_FROM must be configured when Resend is enabled."
+            )
+
+        payload = {
+            "from": email_from,
+            "to": [to_email],
+            "subject": subject,
+            "text": body,
+            "html": _email_html(subject, body),
+        }
+
+        request = Request(
+            "https://api.resend.com/emails",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {resend_api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+
+        try:
+            with urlopen(request, timeout=15) as response:
+                if not 200 <= response.status < 300:
+                    raise RuntimeError(
+                        f"Resend returned HTTP {response.status}."
+                    )
+
+            logger.info("NEXUS auth email delivered to provider successfully.")
+            return
+
+        except HTTPError as exc:
+            error_detail = exc.read().decode("utf-8", errors="replace")
+            logger.error(
+                "Resend email request failed with HTTP %s: %s",
+                exc.code,
+                error_detail,
+            )
+            raise RuntimeError(
+                f"Resend rejected the email request (HTTP {exc.code})."
+            ) from exc
+
+        except URLError as exc:
+            logger.error("Could not connect to Resend: %s", exc.reason)
+            raise RuntimeError(
+                "Could not connect to the Resend email service."
+            ) from exc
+
+    # Existing SMTP fallback.
     if settings.smtp_host:
         if not settings.smtp_from:
-            raise RuntimeError("SMTP_FROM must be configured when SMTP is enabled.")
+            raise RuntimeError(
+                "SMTP_FROM must be configured when SMTP is enabled."
+            )
+
         message = EmailMessage()
         message["From"] = settings.smtp_from
         message["To"] = to_email
         message["Subject"] = subject
         message.set_content(body)
-        message.add_alternative(_email_html(subject, body), subtype="html")
-        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=10) as smtp:
+        message.add_alternative(
+            _email_html(subject, body),
+            subtype="html",
+        )
+
+        with smtplib.SMTP(
+            settings.smtp_host,
+            settings.smtp_port,
+            timeout=10,
+        ) as smtp:
             smtp.starttls()
             if settings.smtp_username:
-                smtp.login(settings.smtp_username, settings.smtp_password or "")
+                smtp.login(
+                    settings.smtp_username,
+                    settings.smtp_password or "",
+                )
             smtp.send_message(message)
+
         return
 
     if settings.environment == "local":
-        # Development-only fallback. Log that the fallback ran, but never log
-        # verification codes or recovery content.
-        logger.warning("SMTP is not configured; auth email was not delivered to %s.", to_email)
+        logger.warning(
+            "Email delivery is not configured; no email was sent."
+        )
         return
 
     raise RuntimeError("Email delivery is not configured.")
