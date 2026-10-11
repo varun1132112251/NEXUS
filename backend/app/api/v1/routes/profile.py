@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -7,6 +9,8 @@ from app.db.session import get_db
 from app.models.user import User
 from app.models.user_profile import UserProfile
 from app.schemas.user_profile import UserProfileRead, UserProfileUpdate
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/profile", tags=["profile"])
 
@@ -22,6 +26,7 @@ def get_profile(
         db.add(profile)
         db.commit()
         db.refresh(profile)
+    logger.info("Profile read for user_id=%s onboarding_completed=%s", current_user.id, profile.onboarding_completed)
     return profile
 
 
@@ -36,6 +41,7 @@ def update_profile(
         profile = UserProfile(user_id=current_user.id)
         db.add(profile)
 
+    logger.info("Profile update for user_id=%s onboarding_completed=%s", current_user.id, payload.onboarding_completed)
     for field, value in payload.model_dump().items():
         setattr(profile, field, value)
 
