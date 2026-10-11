@@ -89,15 +89,32 @@ def _email_html(subject: str, body: str) -> str:
 
 
 def send_auth_email(to_email: str, subject: str, body: str) -> None:
-    # Prefer Resend's official Python SDK. It supplies a standard SDK User-Agent,
-    # unlike the previous raw urllib request that was rejected with Cloudflare 1010.
+    # Prefer Brevo SMTP when configured. This lets deployments migrate away from
+    # Resend without having to remove the old key until delivery is verified.
+    if settings.smtp_host and settings.smtp_username and settings.smtp_password:
+        if not settings.smtp_from:
+            raise RuntimeError("SMTP_FROM must be configured when SMTP is enabled.")
+        message = EmailMessage()
+        message["From"] = settings.smtp_from
+        message["To"] = to_email.strip().lower()
+        message["Subject"] = subject
+        message.set_content(body)
+        message.add_alternative(_email_html(subject, body), subtype="html")
+        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15) as smtp:
+            smtp.ehlo()
+            smtp.starttls()
+            smtp.ehlo()
+            smtp.login(settings.smtp_username, settings.smtp_password)
+            smtp.send_message(message)
+        logger.info("SMTP_ACCEPTED auth email to %s via %s", to_email.strip().lower(), settings.smtp_host)
+        return
+
+    # Resend remains available as fallback when SMTP is not configured.
     resend_api_key = os.getenv("RESEND_API_KEY")
     email_from = os.getenv("EMAIL_FROM")
-
     if resend_api_key:
         if not email_from:
             raise RuntimeError("EMAIL_FROM must be configured when Resend is enabled.")
-
         resend.api_key = resend_api_key
         try:
             result = resend.Emails.send({
@@ -107,31 +124,13 @@ def send_auth_email(to_email: str, subject: str, body: str) -> None:
                 "text": body,
                 "html": _email_html(subject, body),
             })
-            logger.info("RESEND_ACCEPTED auth email to %s: %s", to_email, result)
+            logger.info("RESEND_ACCEPTED auth email to %s: %s", to_email.strip().lower(), result)
         except Exception:
-            logger.exception("Resend SDK failed to send auth email to %s.", to_email)
+            logger.exception("Resend SDK failed to send auth email to %s.", to_email.strip().lower())
             raise
         return
 
-    # Existing SMTP fallback for environments where SMTP is reachable.
-    if settings.smtp_host:
-        if not settings.smtp_from:
-            raise RuntimeError("SMTP_FROM must be configured when SMTP is enabled.")
-        message = EmailMessage()
-        message["From"] = settings.smtp_from
-        message["To"] = to_email
-        message["Subject"] = subject
-        message.set_content(body)
-        message.add_alternative(_email_html(subject, body), subtype="html")
-        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=10) as smtp:
-            smtp.starttls()
-            if settings.smtp_username:
-                smtp.login(settings.smtp_username, settings.smtp_password or "")
-            smtp.send_message(message)
-        return
-
     if settings.environment == "local":
-        logger.warning("Email delivery is not configured; no email was sent to %s.", to_email)
+        logger.warning("Email delivery is not configured; no email was sent to %s.", to_email.strip().lower())
         return
-
     raise RuntimeError("Email delivery is not configured.")
