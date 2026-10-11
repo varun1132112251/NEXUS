@@ -161,7 +161,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> Token:
 
 @router.post("/email/start", response_model=dict)
 def start_email_verification(payload: EmailStartRequest, db: Session = Depends(get_db)) -> dict:
-    email = str(payload.email)
+    email = str(payload.email).strip().lower()
     existing = db.scalar(select(User).where(User.email == email))
     if existing and existing.email_verified:
         raise HTTPException(status_code=409, detail="An account already exists for this email. Sign in instead.")
@@ -193,7 +193,7 @@ def start_email_verification(payload: EmailStartRequest, db: Session = Depends(g
 
 @router.post("/email/verify")
 def verify_email(payload: EmailVerifyRequest, db: Session = Depends(get_db)):
-    email = str(payload.email)
+    email = str(payload.email).strip().lower()
     token = _latest_token(db, email, "email_verification")
     now = datetime.now(UTC)
     valid = (
@@ -297,7 +297,7 @@ def complete_account_setup(payload: AccountSetupRequest, db: Session = Depends(g
 
 @router.post("/password-reset/start", response_model=dict)
 def start_password_reset(payload: PasswordResetStartRequest, db: Session = Depends(get_db)) -> dict:
-    email = str(payload.email)
+    email = str(payload.email).strip().lower()
     _enforce_send_limit(db, email, "password_reset_start_limit")
     user = db.scalar(select(User).where(User.email == email, User.email_verified.is_(True)))
     if user:
@@ -316,16 +316,20 @@ def start_password_reset(payload: PasswordResetStartRequest, db: Session = Depen
                 "Hello,\n\nWe received a request to recover your NEXUS account. Use the code below to continue with password recovery.\n\n"
                 + f"Your NEXUS password reset code is: {code}\n\nThis code expires in 15 minutes.\n\nIf you did not request a password reset, you can safely ignore this email. Never share your recovery code with anyone.",
             )
-        except Exception:
+        except Exception as exc:
             logger.exception("Failed to deliver NEXUS password-reset email.")
             token.consumed_at = datetime.now(UTC)
             db.commit()
+            raise HTTPException(
+                status_code=503,
+                detail="We could not send the recovery email right now. Please try again later.",
+            ) from exc
     return {"message": "If an account exists for this email, a reset message has been sent."}
 
 
 @router.post("/password-reset/verify", response_model=dict)
 def verify_password_reset(payload: PasswordResetVerifyRequest, db: Session = Depends(get_db)) -> dict:
-    email = str(payload.email)
+    email = str(payload.email).strip().lower()
     token = _latest_token(db, email, "password_reset")
     now = datetime.now(UTC)
     valid = (
@@ -359,7 +363,7 @@ def verify_password_reset(payload: PasswordResetVerifyRequest, db: Session = Dep
 
 
 def _consume_recovery_session(payload: PasswordRecoverySessionRequest, db: Session) -> User:
-    email = str(payload.email)
+    email = str(payload.email).strip().lower()
     token = _latest_token(db, email, "password_reset_session")
     now = datetime.now(UTC)
     valid = (
