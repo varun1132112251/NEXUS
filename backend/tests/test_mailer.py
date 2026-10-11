@@ -16,6 +16,9 @@ def test_auth_email_has_plain_text_and_html_parts(monkeypatch):
         def __exit__(self, *_args):
             return False
 
+        def ehlo(self):
+            sent["ehlo"] = True
+
         def starttls(self):
             sent["tls"] = True
 
