@@ -370,7 +370,7 @@ function App() {
   if (!token) return <Login onLogin={setToken} />;
   if (checkingProfile) return <div className="loading">Loading NEXUS<span>•</span><span>•</span><span>•</span></div>;
   if (!profile?.onboarding_completed) {
-    return <ProfileOnboarding token={token} onComplete={setProfile} />;
+    return <ProfileOnboarding token={token} onComplete={setProfile} initialProfile={profile} />;
   }
 
   return <Dashboard token={token} onLogout={logout} />;
