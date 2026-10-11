@@ -100,12 +100,17 @@ def send_auth_email(to_email: str, subject: str, body: str) -> None:
         message["Subject"] = subject
         message.set_content(body)
         message.add_alternative(_email_html(subject, body), subtype="html")
-        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15) as smtp:
-            smtp.ehlo()
-            smtp.starttls()
-            smtp.ehlo()
-            smtp.login(settings.smtp_username, settings.smtp_password)
-            smtp.send_message(message)
+        logger.info("SMTP_CONNECT attempt host=%s port=%s recipient=%s", settings.smtp_host, settings.smtp_port, to_email.strip().lower())
+        try:
+            with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=25) as smtp:
+                smtp.ehlo()
+                smtp.starttls()
+                smtp.ehlo()
+                smtp.login(settings.smtp_username, settings.smtp_password)
+                smtp.send_message(message)
+        except Exception as exc:
+            logger.exception("SMTP_DELIVERY_FAILED host=%s port=%s error_type=%s", settings.smtp_host, settings.smtp_port, type(exc).__name__)
+            raise
         logger.info("SMTP_ACCEPTED auth email to %s via %s", to_email.strip().lower(), settings.smtp_host)
         return
 
