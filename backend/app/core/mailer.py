@@ -137,9 +137,7 @@ def send_auth_email(to_email: str, subject: str, body: str) -> None:
         logger.info("SMTP_CONNECT attempt host=%s port=%s recipient=%s", settings.smtp_host, settings.smtp_port, to_email.strip().lower())
         try:
             with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=25) as smtp:
-                smtp.ehlo()
                 smtp.starttls()
-                smtp.ehlo()
                 smtp.login(settings.smtp_username, settings.smtp_password)
                 smtp.send_message(message)
         except Exception as exc:
