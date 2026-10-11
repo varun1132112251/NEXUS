@@ -121,7 +121,7 @@ def send_auth_email(to_email: str, subject: str, body: str) -> None:
                 response_body = response.read().decode("utf-8", errors="replace")
                 if not 200 <= response.status < 300:
                     raise RuntimeError(f"Resend returned HTTP {response.status}.")
-                logger.info("Resend accepted NEXUS auth email request: %s", response_body)
+                logger.info("RESEND_ACCEPTED auth email: %s", response_body)
             return
         except HTTPError as exc:
             error_detail = exc.read().decode("utf-8", errors="replace")
