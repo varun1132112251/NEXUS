@@ -7,6 +7,7 @@ Revises: a6b1c2d3e4f5
 from collections.abc import Sequence
 
 from alembic import op
+from sqlalchemy import text
 
 revision: str = "f1a2b3c4d5e6"
 down_revision: str | Sequence[str] | None = "a6b1c2d3e4f5"
@@ -22,7 +23,7 @@ def upgrade() -> None:
         "time_sessions",
         ["user_id"],
         unique=True,
-        postgresql_where="status = 'running'",
+        postgresql_where=text("status = 'running'"),
     )
 
 
