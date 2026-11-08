@@ -70,6 +70,19 @@ def owned(db: Session, model, item_id: UUID, user_id: UUID):
     return item
 
 
+def increment_target_progress(db: Session, target: Target, user_id: UUID, amount: int) -> None:
+    """Increment target progress atomically inside the caller's transaction."""
+    db.execute(
+        update(Target)
+        .where(Target.id == target.id, Target.user_id == user_id)
+        .values(
+            current_value=Target.current_value + amount,
+            updated_at=func.now(),
+        )
+        .execution_options(synchronize_session=False)
+    )
+
+
 def validate_links(db: Session, payload: ActivityRecordCreate, user_id: UUID):
     if payload.time_session_id is not None:
         owned(db, TimeSession, payload.time_session_id, user_id)
@@ -102,17 +115,8 @@ def create(
         if payload.metric_value is None:
             raise HTTPException(status_code=422, detail=f"Enter a measured value for target metric '{target.metric_type}'.")
 
-        # Atomic SQL increment prevents concurrent activity submissions from
-        # overwriting each other's target progress (lost-update race).
-        db.execute(
-            update(Target)
-            .where(Target.id == target.id, Target.user_id == user.id)
-            .values(
-                current_value=Target.current_value + payload.metric_value,
-                updated_at=func.now(),
-            )
-            .execution_options(synchronize_session=False)
-        )
+        # Keep the progress increment and activity ledger insert in one transaction.
+        increment_target_progress(db, target, user.id, payload.metric_value)
 
     item_payload = payload.model_dump(exclude_none=True)
     item_payload.pop("metric_type", None)
