@@ -1,7 +1,8 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.v1.routes.auth import get_current_user
@@ -100,13 +101,42 @@ def create(
     if target is not None:
         if payload.metric_value is None:
             raise HTTPException(status_code=422, detail=f"Enter a measured value for target metric '{target.metric_type}'.")
-        target.current_value += payload.metric_value
+
+        # Atomic SQL increment prevents concurrent activity submissions from
+        # overwriting each other's target progress (lost-update race).
+        db.execute(
+            update(Target)
+            .where(Target.id == target.id, Target.user_id == user.id)
+            .values(
+                current_value=Target.current_value + payload.metric_value,
+                updated_at=func.now(),
+            )
+            .execution_options(synchronize_session=False)
+        )
 
     item_payload = payload.model_dump(exclude_none=True)
     item_payload.pop("metric_type", None)
     item = ActivityRecord(user_id=user.id, **item_payload)
     db.add(item)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        # The database unique index is authoritative if two requests try to
+        # review the same time session at once.
+        if payload.time_session_id is not None:
+            existing = db.scalar(
+                select(ActivityRecord).where(
+                    ActivityRecord.user_id == user.id,
+                    ActivityRecord.time_session_id == payload.time_session_id,
+                )
+            )
+            if existing is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="This time session has already been reviewed.",
+                ) from exc
+        raise
     db.refresh(item)
     return item
 
