@@ -6,6 +6,7 @@ from app.models.auth_token import AuthToken
 from app.models.diary import DiaryEntry
 from app.models.habit import Habit
 from app.models.project import Project
+from app.models.personal_memory import PersonalMemory
 from app.models.routine_template import RoutineTemplate
 from app.models.schedule import ScheduleItem
 from app.models.target import Target
