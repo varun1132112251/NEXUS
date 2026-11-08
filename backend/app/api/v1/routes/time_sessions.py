@@ -3,6 +3,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.v1.routes.auth import get_current_user
@@ -59,24 +60,30 @@ def start(
         raise HTTPException(status_code=409, detail="A time session is already running.")
 
     schedule = validate_links(db, payload, user.id)
+    session_data = payload.model_dump()
     if schedule is not None:
-        if payload.task_id is None:
-            payload.task_id = schedule.task_id
-        if payload.habit_id is None:
-            payload.habit_id = schedule.habit_id
-        if payload.project_id is None:
-            payload.project_id = schedule.project_id
-        if payload.target_id is None:
-            payload.target_id = schedule.target_id
+        session_data["task_id"] = session_data["task_id"] or schedule.task_id
+        session_data["habit_id"] = session_data["habit_id"] or schedule.habit_id
+        session_data["project_id"] = session_data["project_id"] or schedule.project_id
+        session_data["target_id"] = session_data["target_id"] or schedule.target_id
 
     session = TimeSession(
         user_id=user.id,
         started_at=datetime.now(UTC),
         status="running",
-        **payload.model_dump(),
+        **session_data,
     )
     db.add(session)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        # The partial unique index is the final concurrency-safe guard. This
+        # handles the race where two start requests both passed the read check.
+        raise HTTPException(
+            status_code=409,
+            detail="A time session is already running.",
+        ) from exc
     db.refresh(session)
     return session
 
