@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
@@ -131,3 +131,16 @@ def archive_memory(
     db.commit()
     db.refresh(memory)
     return memory
+
+
+
+@router.delete("/{memory_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_memory(
+    memory_id: UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    memory = owned_memory(db, memory_id, user.id)
+    db.delete(memory)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
