@@ -7,6 +7,7 @@ from app.api.v1.routes.auth import router as auth_router
 from app.api.v1.routes.habits import router as habits_router
 from app.api.v1.routes.health import router as health_router
 from app.api.v1.routes.projects import router as projects_router
+from app.api.v1.routes.personal_memories import router as personal_memories_router
 from app.api.v1.routes.profile import router as profile_router
 from app.api.v1.routes.schedules import router as schedules_router
 from app.api.v1.routes.routines import router as routines_router
