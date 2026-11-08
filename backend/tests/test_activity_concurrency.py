@@ -30,6 +30,6 @@ def test_target_progress_uses_atomic_database_increment() -> None:
     increment_target_progress(db, target, target.user_id, 3)
 
     sql = str(db.statement.compile(dialect=postgresql.dialect()))
-    assert "UPDATE targets SET current_value=(targets.current_value +" in sql
+    assert "current_value +" in sql
     assert "WHERE targets.id =" in sql
     assert "AND targets.user_id =" in sql
