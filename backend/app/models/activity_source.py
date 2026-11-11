@@ -33,6 +33,8 @@ class ActivitySource(Base):
         Index("ix_activity_sources_user_revoked", "user_id", "revoked_at"),
     )
 
+    __mapper_args__ = {"eager_defaults": True}
+
     id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
     user_id: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True

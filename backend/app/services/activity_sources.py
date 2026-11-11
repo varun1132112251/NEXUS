@@ -5,6 +5,7 @@ import hmac
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.activity_event import ActivityEvent
@@ -13,6 +14,12 @@ from app.models.activity_source import ActivitySource, credential_digest, verify
 
 class InvalidDeviceCredential(ValueError):
     pass
+
+
+class DuplicateActivityEvent(ValueError):
+    def __init__(self, event: ActivityEvent):
+        self.event = event
+        super().__init__("Event already ingested")
 
 
 def ingest_device_event(
@@ -52,5 +59,17 @@ def ingest_device_event(
         payload=payload or {},
     )
     db.add(event_row)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        existing = db.scalar(
+            select(ActivityEvent).where(
+                ActivityEvent.source_id == source.id,
+                ActivityEvent.external_event_id == external_event_id,
+            )
+        )
+        if existing is not None:
+            raise DuplicateActivityEvent(existing)
+        raise
     return event_row

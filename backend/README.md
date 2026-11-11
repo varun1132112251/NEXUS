@@ -66,3 +66,51 @@ Authentication now supports:
 - password recovery through verified email
 - Argon2id password hashing
 - short-lived JWT access tokens and setup tickets
+
+## Activity Engine device API
+
+Activity sources let a user link a supported device and send bounded activity signals. Registration, listing, and revocation require a NEXUS access token in `Authorization: Bearer <access-token>`. Event ingestion uses the device credential returned once by registration in the same header. Configure `ACTIVITY_SOURCE_HMAC_KEY` to a random value of at least 32 bytes; the API stores only an HMAC digest and returns the raw device credential only in the registration response.
+
+Supported source types are `windows` and `android`. Source names are unique per user. Revocation immediately prevents further ingestion. The event API accepts only the event categories `app_focus`, `idle`, `active`, and `device_session`, with a timezone-aware `occurred_at` and a small metadata object. Do not send keystrokes, passwords, messages, screenshots, document contents, or arbitrary text.
+
+### Register a device
+
+```http
+POST /api/v1/activity-sources
+Authorization: Bearer <nexus-access-token>
+Content-Type: application/json
+
+{"name":"Work laptop","source_type":"windows"}
+```
+
+The `201` response includes source metadata and the device `credential`. Save that credential on the device at registration time; it is not returned by listing or any later request.
+
+### List or revoke devices
+
+```http
+GET /api/v1/activity-sources
+Authorization: Bearer <nexus-access-token>
+
+DELETE /api/v1/activity-sources/<source-id>
+Authorization: Bearer <nexus-access-token>
+```
+
+Listing returns only the authenticated user's sources, including revoked entries with `revoked_at`. Revocation returns `204`; unknown or another user's source IDs return `404`.
+
+### Ingest an event
+
+```http
+POST /api/v1/activity-sources/events
+Authorization: Bearer <device-credential>
+Content-Type: application/json
+
+{
+  "external_event_id":"win-session-001",
+  "event_type":"active",
+  "occurred_at":"2026-11-11T10:30:00Z",
+  "confidence":0.9,
+  "payload":{"duration_seconds":120,"application_category":"development"}
+}
+```
+
+Successful first submissions return `200` with `duplicate: false`; retrying the same `external_event_id` from the same source returns the original event with `duplicate: true`. Source ownership is derived from the credential; device payloads cannot set `user_id`. Event metadata is limited to 32 scalar fields and 4096 encoded bytes.

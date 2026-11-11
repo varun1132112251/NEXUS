@@ -56,6 +56,7 @@ jobs:
             tests/test_activity_postgres.py \
             tests/test_activity_migration_postgres.py \
             tests/test_activity_contributions.py \
+            tests/test_activity_source_api.py \
             -v \
             --junitxml=activity-postgres-results.xml
           pytest_status=$?
