@@ -121,8 +121,11 @@ def test_postgres_update_increase_decrease_and_move_are_checked(pg_sessions):
     with pg_sessions.begin() as db:
         user, t1, t2, first = make_activity(db)
         second = ActivitySession(id=uuid4(), user_id=user.id, title="second", started_at=first.started_at, ended_at=first.ended_at, duration_seconds=100, status="confirmed")
+        db.add(second)
+        db.flush()
         row = ActivityGoalContribution(id=uuid4(), user_id=user.id, activity_session_id=first.id, target_id=t1.id, contribution_type="time", contribution_value=Decimal(50), unit="seconds")
-        db.add_all([second, row]); db.flush()
+        db.add(row)
+        db.flush()
         row_id, second_id = row.id, second.id
     with pg_sessions.begin() as db:
         db.execute(update(ActivityGoalContribution).where(ActivityGoalContribution.id == row_id).values(contribution_value=70))
@@ -140,9 +143,18 @@ def test_postgres_concurrent_opposite_moves_are_serialized_or_aborted(pg_session
     with pg_sessions.begin() as db:
         user, t1, t2, first = make_activity(db)
         second = ActivitySession(id=uuid4(), user_id=user.id, title="second", started_at=first.started_at, ended_at=first.ended_at, duration_seconds=100, status="confirmed")
+        db.add(second)
+        db.flush()
+        persisted_sessions = db.scalar(
+            select(func.count()).select_from(ActivitySession).where(
+                ActivitySession.id.in_((first.id, second.id))
+            )
+        )
+        assert persisted_sessions == 2
         a = ActivityGoalContribution(id=uuid4(), user_id=user.id, activity_session_id=first.id, target_id=t1.id, contribution_type="time", contribution_value=Decimal(60), unit="seconds")
         b = ActivityGoalContribution(id=uuid4(), user_id=user.id, activity_session_id=second.id, target_id=t2.id, contribution_type="time", contribution_value=Decimal(60), unit="seconds")
-        db.add_all([second, a, b]); db.flush()
+        db.add_all([a, b])
+        db.flush()
         aid, bid, first_id, second_id = a.id, b.id, first.id, second.id
     barrier = Barrier(2)
 
@@ -156,9 +168,8 @@ def test_postgres_concurrent_opposite_moves_are_serialized_or_aborted(pg_session
             return False
 
     with ThreadPoolExecutor(2) as pool:
-    # Each independent move can temporarily exceed the destination session's
-    # capacity while the opposite move is still uncommitted, so the trigger may
-    # correctly abort either or both transactions.
+        # Each independent move can temporarily exceed the destination
+        # capacity, so the trigger may correctly abort either or both.
         list(pool.map(lambda args: move(*args), [(aid, second_id), (bid, first_id)]))
     with pg_sessions() as db:
         for session_id in (first_id, second_id):
