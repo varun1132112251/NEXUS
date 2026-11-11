@@ -121,18 +121,18 @@ BEGIN
 
   FOREACH affected_session_id IN ARRAY affected_ids LOOP
     IF NOT EXISTS (SELECT 1 FROM activity_sessions WHERE id = affected_session_id) THEN
-      RAISE EXCEPTION 'activity session % does not exist', affected_session_id;
+      RAISE EXCEPTION 'activity session %% does not exist', affected_session_id;
     END IF;
     SELECT duration_seconds INTO activity_duration FROM activity_sessions WHERE id = affected_session_id;
     IF activity_duration IS NULL THEN
-      RAISE EXCEPTION 'time allocation requires a credited duration for session %', affected_session_id;
+      RAISE EXCEPTION 'time allocation requires a credited duration for session %%', affected_session_id;
     END IF;
     SELECT COALESCE(SUM(c.contribution_value), 0) INTO allocated_duration
       FROM activity_goal_contributions c
       WHERE c.activity_session_id = affected_session_id AND c.contribution_type = 'time';
     IF allocated_duration > activity_duration THEN
       invalid_session_id := affected_session_id;
-      RAISE EXCEPTION 'time allocations exceed activity duration for session %', invalid_session_id;
+      RAISE EXCEPTION 'time allocations exceed activity duration for session %%', invalid_session_id;
     END IF;
   END LOOP;
   RETURN NULL;

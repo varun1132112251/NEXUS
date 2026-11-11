@@ -1,4 +1,5 @@
 from sqlalchemy import CheckConstraint, ForeignKeyConstraint, UniqueConstraint
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects.postgresql import JSONB
 
 from app.models import (
@@ -8,6 +9,13 @@ from app.models import (
     ActivitySession,
     ActivitySource,
 )
+from app.models.activity_goal_contribution import _allocation_trigger
+
+
+def test_allocation_trigger_ddl_compiles_with_postgresql_percent_placeholders() -> None:
+    compiled = str(_allocation_trigger.compile(dialect=postgresql.dialect()))
+
+    assert compiled.count("session %%") == 3
 
 
 def test_activity_engine_models_are_registered() -> None:
