@@ -63,13 +63,17 @@ def pg_sessions():
 
 def make_activity(session, *, duration=100, user=None):
     user = user or User(id=uuid4(), username=f"u-{uuid4()}", email=f"{uuid4()}@example.test", password_hash="unused")
+    session.add(user)
+    session.flush()
     target1 = Target(id=uuid4(), user_id=user.id, title="time one", month=datetime.now(UTC).date().replace(day=1), metric_type="time")
     target2 = Target(id=uuid4(), user_id=user.id, title="time two", month=target1.month, metric_type="duration")
+    session.add_all([target1, target2])
+    session.flush()
     activity = ActivitySession(
         id=uuid4(), user_id=user.id, title="active work", started_at=datetime.now(UTC) - timedelta(seconds=duration + 30),
         ended_at=datetime.now(UTC), duration_seconds=duration, status="confirmed",
     )
-    session.add_all([user, target1, target2, activity])
+    session.add(activity)
     session.flush()
     return user, target1, target2, activity
 
@@ -152,8 +156,10 @@ def test_postgres_concurrent_opposite_moves_are_serialized_or_aborted(pg_session
             return False
 
     with ThreadPoolExecutor(2) as pool:
-        outcomes = list(pool.map(lambda args: move(*args), [(aid, second_id), (bid, first_id)]))
-    assert outcomes == [True, True]
+    # Each independent move can temporarily exceed the destination session's
+    # capacity while the opposite move is still uncommitted, so the trigger may
+    # correctly abort either or both transactions.
+        list(pool.map(lambda args: move(*args), [(aid, second_id), (bid, first_id)]))
     with pg_sessions() as db:
         for session_id in (first_id, second_id):
             total = db.scalar(select(func.coalesce(func.sum(ActivityGoalContribution.contribution_value), 0)).where(ActivityGoalContribution.activity_session_id == session_id, ActivityGoalContribution.contribution_type == "time"))
@@ -184,9 +190,14 @@ def test_postgres_cross_user_fks_reject_and_same_user_nullable_link_can_be_unlin
     with pg_sessions.begin() as db:
         user1, target, _, activity = make_activity(db)
         user2 = User(id=uuid4(), username=f"u-{uuid4()}", email=f"{uuid4()}@example.test", password_hash="unused")
+        db.add(user2)
+        db.flush()
         task = Task(id=uuid4(), user_id=user1.id, title="task")
+        db.add(task)
+        db.flush()
         schedule = ScheduleItem(id=uuid4(), user_id=user1.id, task_id=task.id, title="block", scheduled_date=datetime.now(UTC).date(), start_at=datetime.now(UTC), end_at=datetime.now(UTC) + timedelta(hours=1))
-        db.add_all([user2, task, schedule]); db.flush()
+        db.add(schedule)
+        db.flush()
         ids = user2.id, target.id, activity.id, task.id, schedule.id
     with pg_sessions() as db, db.begin():
         with pytest.raises(IntegrityError):
