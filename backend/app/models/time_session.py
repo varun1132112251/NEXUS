@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, ForeignKeyConstraint, Integer, String, Text, UniqueConstraint, Uuid, text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, String, Text, UniqueConstraint, Uuid, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -25,6 +25,12 @@ class TimeSession(Base):
         CheckConstraint("status IN ('running', 'completed', 'cancelled')", name="ck_time_sessions_status"),
         CheckConstraint("duration_seconds IS NULL OR duration_seconds >= 0", name="ck_time_sessions_duration"),
         CheckConstraint("(status = 'running' AND ended_at IS NULL AND duration_seconds IS NULL) OR (status = 'completed' AND ended_at IS NOT NULL AND ended_at > started_at AND duration_seconds IS NOT NULL AND duration_seconds >= 0 AND duration_seconds <= floor(extract(epoch FROM (ended_at - started_at)))) OR (status = 'cancelled' AND duration_seconds IS NULL AND (ended_at IS NULL OR ended_at > started_at))", name="ck_time_sessions_status_timing"),
+        Index(
+            "uq_time_sessions_one_running_per_user",
+            "user_id",
+            unique=True,
+            postgresql_where=text("status = 'running'"),
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)

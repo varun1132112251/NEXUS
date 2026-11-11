@@ -1,6 +1,9 @@
 name: Activity Engine PostgreSQL Tests
 
 on:
+  pull_request:
+    branches:
+      - v1.3/activity-engine-foundation
   workflow_dispatch:
   push:
     branches:
@@ -44,14 +47,20 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
-      - name: Run PostgreSQL integration tests
+      - name: Run Activity Engine and migration PostgreSQL tests
         working-directory: backend
         shell: bash
         run: |
           set +e
-          pytest tests/test_activity_postgres.py -v --junitxml=activity-postgres-results.xml
+          pytest \
+            tests/test_activity_postgres.py \
+            tests/test_activity_migration_postgres.py \
+            tests/test_activity_contributions.py \
+            -v \
+            --junitxml=activity-postgres-results.xml
           pytest_status=$?
           set -e
+
           python - activity-postgres-results.xml "$pytest_status" <<'PY'
           import sys
           import xml.etree.ElementTree as ET
@@ -59,34 +68,22 @@ jobs:
           root = ET.parse(sys.argv[1]).getroot()
           suites = [root] if root.tag == "testsuite" else list(root.iter("testsuite"))
           cases = [case for suite in suites for case in suite.findall("testcase")]
-          passed = sum(not any(case.find(tag) is not None for tag in ("failure", "error", "skipped")) for case in cases)
-          failed = sum(case.find("failure") is not None or case.find("error") is not None for case in cases)
-          skipped = sum(case.find("skipped") is not None for case in cases)
-          print(f"PostgreSQL integration results: passed={passed}, failed={failed}, skipped={skipped}")
-          if int(sys.argv[2]) != 0 or failed or skipped:
-              if skipped:
-                  print("PostgreSQL integration tests must not be skipped.", file=sys.stderr)
-              sys.exit(1)
-          PY
-      - name: Run complete backend test suite
-        working-directory: backend
-        shell: bash
-        run: |
-          set +e
-          pytest tests -v --junitxml=backend-test-results.xml
-          pytest_status=$?
-          set -e
-          python - backend-test-results.xml "$pytest_status" <<'PY'
-          import sys
-          import xml.etree.ElementTree as ET
 
-          root = ET.parse(sys.argv[1]).getroot()
-          suites = [root] if root.tag == "testsuite" else list(root.iter("testsuite"))
-          cases = [case for suite in suites for case in suite.findall("testcase")]
-          passed = sum(not any(case.find(tag) is not None for tag in ("failure", "error", "skipped")) for case in cases)
-          failed = sum(case.find("failure") is not None or case.find("error") is not None for case in cases)
+          passed = sum(
+              not any(case.find(tag) is not None for tag in ("failure", "error", "skipped"))
+              for case in cases
+          )
+          failed = sum(
+              case.find("failure") is not None or case.find("error") is not None
+              for case in cases
+          )
           skipped = sum(case.find("skipped") is not None for case in cases)
-          print(f"Complete backend suite results: passed={passed}, failed={failed}, skipped={skipped}")
-          if int(sys.argv[2]) != 0 or failed:
+
+          print(
+              f"PostgreSQL 18.6 results: "
+              f"passed={passed}, failed={failed}, skipped={skipped}"
+          )
+
+          if int(sys.argv[2]) != 0 or failed or skipped:
               sys.exit(1)
           PY

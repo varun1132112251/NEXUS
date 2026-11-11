@@ -36,6 +36,7 @@ jobs:
       ENVIRONMENT: test
       DEBUG: "false"
       DATABASE_URL: postgresql+psycopg://nexus:nexus_ci_password@localhost:5432/nexus
+      POSTGRES_TEST_URL: postgresql+psycopg://nexus:nexus_ci_password@localhost:5432/nexus
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

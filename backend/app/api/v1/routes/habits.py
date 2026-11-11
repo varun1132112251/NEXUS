@@ -200,5 +200,6 @@ def update(habit_id: UUID, payload: HabitUpdate, db: Session = Depends(get_db), 
 @router.delete("/{habit_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete(habit_id: UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     x = owned(db, habit_id, user.id)
+    unlink_owned_references(db, Habit, x.id, user.id)
     db.delete(x)
     db.commit()

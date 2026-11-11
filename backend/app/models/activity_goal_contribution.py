@@ -121,6 +121,11 @@ BEGIN
 
   FOREACH affected_session_id IN ARRAY affected_ids LOOP
     IF NOT EXISTS (SELECT 1 FROM activity_sessions WHERE id = affected_session_id) THEN
+      -- The parent row is absent during its FK-driven ON DELETE CASCADE.
+      -- A missing parent for INSERT/UPDATE is still an integrity violation.
+      IF TG_OP = 'DELETE' THEN
+        CONTINUE;
+      END IF;
       RAISE EXCEPTION 'activity session %% does not exist', affected_session_id;
     END IF;
     SELECT duration_seconds INTO activity_duration FROM activity_sessions WHERE id = affected_session_id;
@@ -152,12 +157,15 @@ CREATE TRIGGER trg_activity_time_allocation_delete
   EXECUTE FUNCTION nexus_check_activity_time_allocations();
 
 CREATE FUNCTION nexus_check_activity_session_duration_change() RETURNS trigger AS $$
-DECLARE changed_id uuid;
-DECLARE allocated_duration numeric;
-DECLARE changed_duration integer;
+DECLARE
+  changed_id uuid;
+  allocated_duration numeric;
+  changed_duration integer;
 BEGIN
-  FOR changed_id IN SELECT id FROM new_rows WHERE duration_seconds IS DISTINCT FROM
-      (SELECT duration_seconds FROM old_rows WHERE old_rows.id = new_rows.id)
+  FOR changed_id IN
+    SELECT n.id FROM new_rows n
+    JOIN old_rows o ON o.id = n.id
+    WHERE n.duration_seconds IS DISTINCT FROM o.duration_seconds
   LOOP
     SELECT duration_seconds INTO changed_duration FROM activity_sessions WHERE id = changed_id;
     SELECT COALESCE(SUM(contribution_value), 0) INTO allocated_duration

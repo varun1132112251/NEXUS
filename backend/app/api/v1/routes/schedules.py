@@ -100,5 +100,6 @@ def delete(
     user: User = Depends(get_current_user),
 ):
     item = owned(db, ScheduleItem, schedule_id, user.id)
+    unlink_owned_references(db, ScheduleItem, item.id, user.id)
     db.delete(item)
     db.commit()

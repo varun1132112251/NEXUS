@@ -10,7 +10,7 @@ import time
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine, delete, event, func, select, update
+from sqlalchemy import create_engine, delete, event, func, insert, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
@@ -186,6 +186,254 @@ def test_postgres_delete_releases_time_capacity(pg_sessions):
         db.execute(delete(ActivityGoalContribution).where(ActivityGoalContribution.id == row_id))
         assert db.scalar(select(func.count()).select_from(ActivityGoalContribution).where(ActivityGoalContribution.activity_session_id == activity_id)) == 0
         allocate_time(db, user_id=user_id, activity_session_id=activity_id, target_id=target_id, seconds=100)
+
+
+def test_postgres_session_delete_cascades_time_contributions_only(pg_sessions):
+    with pg_sessions.begin() as db:
+        user, target_a, target_b, session_a = make_activity(db)
+        session_b = ActivitySession(
+            id=uuid4(), user_id=user.id, title="unrelated session",
+            started_at=session_a.started_at, ended_at=session_a.ended_at,
+            duration_seconds=100, status="confirmed",
+        )
+        db.add(session_b)
+        db.flush()
+        row_a = ActivityGoalContribution(
+            id=uuid4(), user_id=user.id, activity_session_id=session_a.id,
+            target_id=target_a.id, contribution_type="time",
+            contribution_value=Decimal(40), unit="seconds",
+        )
+        row_b = ActivityGoalContribution(
+            id=uuid4(), user_id=user.id, activity_session_id=session_b.id,
+            target_id=target_b.id, contribution_type="time",
+            contribution_value=Decimal(30), unit="seconds",
+        )
+        db.add_all([row_a, row_b])
+        db.flush()
+        deleted_session_id, deleted_row_id = session_a.id, row_a.id
+        retained_session_id, retained_row_id = session_b.id, row_b.id
+
+        db.execute(delete(ActivitySession).where(ActivitySession.id == deleted_session_id))
+        assert db.scalar(select(func.count()).select_from(ActivitySession).where(
+            ActivitySession.id == deleted_session_id
+        )) == 0
+        assert db.scalar(select(func.count()).select_from(ActivityGoalContribution).where(
+            ActivityGoalContribution.id == deleted_row_id
+        )) == 0
+        assert db.scalar(select(func.count()).select_from(ActivitySession).where(
+            ActivitySession.id == retained_session_id
+        )) == 1
+        assert db.scalar(select(func.count()).select_from(ActivityGoalContribution).where(
+            ActivityGoalContribution.id == retained_row_id
+        )) == 1
+
+
+def test_postgres_session_duration_changes_preserve_allocation_limit(pg_sessions):
+    with pg_sessions.begin() as db:
+        user, target, _, activity = make_activity(db)
+        row = ActivityGoalContribution(
+            id=uuid4(), user_id=user.id, activity_session_id=activity.id,
+            target_id=target.id, contribution_type="time",
+            contribution_value=Decimal(80), unit="seconds",
+        )
+        db.add(row)
+        db.flush()
+        session_id = activity.id
+
+    with pg_sessions() as db, db.begin():
+        with pytest.raises(SQLAlchemyError):
+            with db.begin_nested():
+                db.execute(
+                    update(ActivitySession)
+                    .where(ActivitySession.id == session_id)
+                    .values(duration_seconds=70)
+                )
+
+    with pg_sessions.begin() as db:
+        db.execute(
+            update(ActivitySession)
+            .where(ActivitySession.id == session_id)
+            .values(duration_seconds=90)
+        )
+
+
+def _run_direct_dml_concurrently(pg_sessions, operations):
+    barrier = Barrier(len(operations))
+
+    def run(operation):
+        try:
+            with pg_sessions.begin() as db:
+                barrier.wait(timeout=10)
+                operation(db)
+            return "committed"
+        except Exception:
+            # Deadlock/constraint aborts are acceptable when they preserve the
+            # database invariant; the caller checks final committed totals.
+            return "aborted"
+
+    with ThreadPoolExecutor(len(operations)) as pool:
+        return list(pool.map(run, operations))
+
+
+def _assert_direct_time_totals_within_limits(pg_sessions, session_ids):
+    with pg_sessions() as db:
+        for session_id in session_ids:
+            total = db.scalar(
+                select(func.coalesce(func.sum(ActivityGoalContribution.contribution_value), 0))
+                .where(
+                    ActivityGoalContribution.activity_session_id == session_id,
+                    ActivityGoalContribution.contribution_type == "time",
+                )
+            )
+            duration = db.scalar(
+                select(ActivitySession.duration_seconds)
+                .where(ActivitySession.id == session_id)
+            )
+            assert total <= duration
+
+
+def test_postgres_direct_concurrent_inserts_preserve_allocation_limit(pg_sessions):
+    with pg_sessions.begin() as db:
+        user, target_a, target_b, activity = make_activity(db)
+        user_id, session_id = user.id, activity.id
+
+    def add(target_id):
+        def operation(db):
+            db.execute(insert(ActivityGoalContribution).values(
+                id=uuid4(), user_id=user_id, activity_session_id=session_id,
+                target_id=target_id, contribution_type="time",
+                contribution_value=Decimal(60), unit="seconds",
+            ))
+        return operation
+
+    outcomes = _run_direct_dml_concurrently(
+        pg_sessions, [add(target_a.id), add(target_b.id)]
+    )
+    assert "committed" in outcomes
+    _assert_direct_time_totals_within_limits(pg_sessions, [session_id])
+
+
+def test_postgres_direct_concurrent_increases_preserve_allocation_limit(pg_sessions):
+    with pg_sessions.begin() as db:
+        user, target_a, target_b, activity = make_activity(db)
+        rows = [
+            ActivityGoalContribution(
+                id=uuid4(), user_id=user.id, activity_session_id=activity.id,
+                target_id=target.id, contribution_type="time",
+                contribution_value=Decimal(20), unit="seconds",
+            )
+            for target in (target_a, target_b)
+        ]
+        db.add_all(rows)
+        db.flush()
+        session_id, row_ids = activity.id, [row.id for row in rows]
+
+    operations = [
+        lambda db, row_id=row_id: db.execute(
+            update(ActivityGoalContribution)
+            .where(ActivityGoalContribution.id == row_id)
+            .values(contribution_value=Decimal(60))
+        )
+        for row_id in row_ids
+    ]
+    outcomes = _run_direct_dml_concurrently(pg_sessions, operations)
+    assert "committed" in outcomes
+    _assert_direct_time_totals_within_limits(pg_sessions, [session_id])
+
+
+def test_postgres_direct_concurrent_moves_between_sessions_preserve_limits(pg_sessions):
+    with pg_sessions.begin() as db:
+        user, target_a, target_b, session_a = make_activity(db)
+        session_b = ActivitySession(
+            id=uuid4(), user_id=user.id, title="move destination",
+            started_at=session_a.started_at, ended_at=session_a.ended_at,
+            duration_seconds=100, status="confirmed",
+        )
+        db.add(session_b)
+        db.flush()
+        rows = [
+            ActivityGoalContribution(
+                id=uuid4(), user_id=user.id, activity_session_id=session.id,
+                target_id=target.id, contribution_type="time",
+                contribution_value=Decimal(seconds), unit="seconds",
+            )
+            for session, target, seconds in (
+                (session_a, target_a, 40), (session_b, target_b, 60)
+            )
+        ]
+        db.add_all(rows)
+        db.flush()
+        session_ids, row_ids = [session_a.id, session_b.id], [r.id for r in rows]
+
+    operations = [
+        lambda db: db.execute(
+            update(ActivityGoalContribution)
+            .where(ActivityGoalContribution.id == row_ids[0])
+            .values(activity_session_id=session_ids[1])
+        ),
+        lambda db: db.execute(
+            update(ActivityGoalContribution)
+            .where(ActivityGoalContribution.id == row_ids[1])
+            .values(activity_session_id=session_ids[0])
+        ),
+    ]
+    outcomes = _run_direct_dml_concurrently(pg_sessions, operations)
+    assert "committed" in outcomes
+    _assert_direct_time_totals_within_limits(pg_sessions, session_ids)
+
+
+def test_postgres_direct_opposite_order_moves_preserve_limits(pg_sessions):
+    with pg_sessions.begin() as db:
+        user, target_a, target_b, session_a = make_activity(db)
+        target_c = Target(
+            id=uuid4(), user_id=user.id, title="third time target",
+            month=target_a.month, metric_type="time",
+        )
+        target_d = Target(
+            id=uuid4(), user_id=user.id, title="fourth time target",
+            month=target_a.month, metric_type="time",
+        )
+        db.add_all([target_c, target_d])
+        db.flush()
+        session_b = ActivitySession(
+            id=uuid4(), user_id=user.id, title="opposite move destination",
+            started_at=session_a.started_at, ended_at=session_a.ended_at,
+            duration_seconds=100, status="confirmed",
+        )
+        db.add(session_b)
+        db.flush()
+        rows = [
+            ActivityGoalContribution(
+                id=uuid4(), user_id=user.id, activity_session_id=session.id,
+                target_id=target.id, contribution_type="time",
+                contribution_value=Decimal(20), unit="seconds",
+            )
+            for session, target in (
+                (session_a, target_a), (session_a, target_b),
+                (session_b, target_c), (session_b, target_d),
+            )
+        ]
+        db.add_all(rows)
+        db.flush()
+        session_ids, row_ids = [session_a.id, session_b.id], [r.id for r in rows]
+
+    def move(row_id, session_id):
+        return lambda db: db.execute(
+            update(ActivityGoalContribution)
+            .where(ActivityGoalContribution.id == row_id)
+            .values(activity_session_id=session_id)
+        )
+
+    # Each transaction touches the same pair in an opposite logical order.
+    outcomes = _run_direct_dml_concurrently(
+        pg_sessions,
+        [
+            lambda db: (move(row_ids[0], session_ids[1])(db), move(row_ids[2], session_ids[0])(db)),
+            lambda db: (move(row_ids[3], session_ids[0])(db), move(row_ids[1], session_ids[1])(db)),
+        ],
+    )
+    assert "committed" in outcomes
+    _assert_direct_time_totals_within_limits(pg_sessions, session_ids)
 
 
 def test_postgres_metric_contribution_does_not_consume_time_capacity(pg_sessions):
