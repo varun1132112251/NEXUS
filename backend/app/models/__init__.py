@@ -1,6 +1,11 @@
 """Database models registered with the application metadata."""
 
 from app.models.activity_record import ActivityRecord
+from app.models.activity_correction import ActivityCorrection
+from app.models.activity_event import ActivityEvent
+from app.models.activity_goal_contribution import ActivityGoalContribution
+from app.models.activity_session import ActivitySession
+from app.models.activity_source import ActivitySource
 from app.models.auth_identity import AuthIdentity
 from app.models.auth_token import AuthToken
 from app.models.diary import DiaryEntry
@@ -28,6 +33,11 @@ __all__ = [
     "ScheduleItem",
     "TimeSession",
     "ActivityRecord",
+    "ActivitySource",
+    "ActivityEvent",
+    "ActivitySession",
+    "ActivityGoalContribution",
+    "ActivityCorrection",
     "RoutineTemplate",
     "PersonalMemory",
 ]

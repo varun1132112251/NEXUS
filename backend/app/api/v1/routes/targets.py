@@ -8,6 +8,7 @@ from app.db.session import get_db
 from app.models.target import Target
 from app.models.user import User
 from app.schemas.target import TargetCreate, TargetRead, TargetUpdate
+from app.services.ownership import ReferencedTargetError, unlink_owned_references
 
 router = APIRouter(prefix="/targets", tags=["targets"])
 
@@ -65,4 +66,9 @@ def update_target(target_id: UUID, payload: TargetUpdate, db: Session = Depends(
 
 @router.delete("/{target_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_target(target_id: UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> None:
-    target = owned_target(db, target_id, user.id); db.delete(target); db.commit()
+    target = owned_target(db, target_id, user.id)
+    try:
+        unlink_owned_references(db, Target, target.id, user.id)
+    except ReferencedTargetError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    db.delete(target); db.commit()

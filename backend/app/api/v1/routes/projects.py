@@ -7,6 +7,7 @@ from app.db.session import get_db
 from app.models.project import Project
 from app.models.user import User
 from app.schemas.project import ProjectCreate,ProjectRead,ProjectUpdate
+from app.services.ownership import unlink_owned_references
 router=APIRouter(prefix="/projects",tags=["projects"])
 def owned(db,id,user_id):
     x=db.scalar(select(Project).where(Project.id==id,Project.user_id==user_id))
@@ -25,4 +26,4 @@ def update(project_id:UUID,payload:ProjectUpdate,db:Session=Depends(get_db),user
     db.commit();db.refresh(x);return x
 @router.delete("/{project_id}",status_code=status.HTTP_204_NO_CONTENT)
 def delete(project_id:UUID,db:Session=Depends(get_db),user:User=Depends(get_current_user)):
-    x=owned(db,project_id,user.id);db.delete(x);db.commit()
+    x=owned(db,project_id,user.id);unlink_owned_references(db, Project, x.id, user.id);db.delete(x);db.commit()

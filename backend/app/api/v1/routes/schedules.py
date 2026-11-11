@@ -14,6 +14,7 @@ from app.models.task import Task
 from app.models.target import Target
 from app.models.user import User
 from app.schemas.schedule import ScheduleItemCreate, ScheduleItemRead, ScheduleItemUpdate
+from app.services.ownership import unlink_owned_references
 
 router = APIRouter(prefix="/schedule", tags=["schedule"])
 
@@ -71,6 +72,7 @@ def update(
     user: User = Depends(get_current_user),
 ):
     item = owned(db, ScheduleItem, schedule_id, user.id)
+    unlink_owned_references(db, ScheduleItem, item.id, user.id)
     validate_links(db, payload, user.id)
 
     merged = {

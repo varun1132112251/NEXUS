@@ -13,6 +13,7 @@ from app.models.schedule import ScheduleItem
 from app.models.time_session import TimeSession
 from app.models.user import User
 from app.schemas.habit import HabitCreate, HabitRead, HabitStatsRead, HabitUpdate
+from app.services.ownership import unlink_owned_references
 
 router = APIRouter(prefix="/habits", tags=["habits"])
 LOCAL_TZ = __import__("zoneinfo").ZoneInfo("Asia/Kolkata")
@@ -188,6 +189,7 @@ def stats(
 @router.patch("/{habit_id}", response_model=HabitRead)
 def update(habit_id: UUID, payload: HabitUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     x = owned(db, habit_id, user.id)
+    unlink_owned_references(db, Habit, x.id, user.id)
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(x, k, v)
     db.commit()

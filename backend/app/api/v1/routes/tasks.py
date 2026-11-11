@@ -9,6 +9,7 @@ from app.models.target import Target
 from app.models.task import Task
 from app.models.user import User
 from app.schemas.task import TaskCreate,TaskRead,TaskUpdate
+from app.services.ownership import unlink_owned_references
 router=APIRouter(prefix="/tasks",tags=["tasks"])
 def owned(db,model,id,user_id):
     x=db.scalar(select(model).where(model.id==id,model.user_id==user_id))
@@ -30,4 +31,4 @@ def update(task_id:UUID,payload:TaskUpdate,db:Session=Depends(get_db),user:User=
     db.commit();db.refresh(x);return x
 @router.delete("/{task_id}",status_code=status.HTTP_204_NO_CONTENT)
 def delete(task_id:UUID,db:Session=Depends(get_db),user:User=Depends(get_current_user)):
-    x=owned(db,Task,task_id,user.id);db.delete(x);db.commit()
+    x=owned(db,Task,task_id,user.id);unlink_owned_references(db, Task, x.id, user.id);db.delete(x);db.commit()

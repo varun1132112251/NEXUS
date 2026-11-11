@@ -1,0 +1,92 @@
+name: Activity Engine PostgreSQL Tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - v1.3/activity-engine-foundation
+
+permissions:
+  contents: read
+
+jobs:
+  postgres-tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18.6
+        env:
+          POSTGRES_USER: nexus_activity_test
+          POSTGRES_PASSWORD: nexus_activity_test_only_password
+          POSTGRES_DB: nexus_activity_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U nexus_activity_test -d nexus_activity_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      POSTGRES_TEST_URL: postgresql+psycopg://nexus_activity_test:nexus_activity_test_only_password@127.0.0.1:5433/nexus_activity_test
+      DATABASE_URL: postgresql+psycopg://nexus_activity_test:nexus_activity_test_only_password@127.0.0.1:5433/nexus_activity_test
+      JWT_SECRET_KEY: ci-only-activity-test-secret-not-for-production
+      ENVIRONMENT: test
+      DEBUG: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - name: Install backend test dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Run PostgreSQL integration tests
+        working-directory: backend
+        shell: bash
+        run: |
+          set +e
+          pytest tests/test_activity_postgres.py -v --junitxml=activity-postgres-results.xml
+          pytest_status=$?
+          set -e
+          python - activity-postgres-results.xml "$pytest_status" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse(sys.argv[1]).getroot()
+          suites = [root] if root.tag == "testsuite" else list(root.iter("testsuite"))
+          cases = [case for suite in suites for case in suite.findall("testcase")]
+          passed = sum(not any(case.find(tag) is not None for tag in ("failure", "error", "skipped")) for case in cases)
+          failed = sum(case.find("failure") is not None or case.find("error") is not None for case in cases)
+          skipped = sum(case.find("skipped") is not None for case in cases)
+          print(f"PostgreSQL integration results: passed={passed}, failed={failed}, skipped={skipped}")
+          if int(sys.argv[2]) != 0 or failed or skipped:
+              if skipped:
+                  print("PostgreSQL integration tests must not be skipped.", file=sys.stderr)
+              sys.exit(1)
+          PY
+      - name: Run complete backend test suite
+        working-directory: backend
+        shell: bash
+        run: |
+          set +e
+          pytest tests -v --junitxml=backend-test-results.xml
+          pytest_status=$?
+          set -e
+          python - backend-test-results.xml "$pytest_status" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse(sys.argv[1]).getroot()
+          suites = [root] if root.tag == "testsuite" else list(root.iter("testsuite"))
+          cases = [case for suite in suites for case in suite.findall("testcase")]
+          passed = sum(not any(case.find(tag) is not None for tag in ("failure", "error", "skipped")) for case in cases)
+          failed = sum(case.find("failure") is not None or case.find("error") is not None for case in cases)
+          skipped = sum(case.find("skipped") is not None for case in cases)
+          print(f"Complete backend suite results: passed={passed}, failed={failed}, skipped={skipped}")
+          if int(sys.argv[2]) != 0 or failed:
+              sys.exit(1)
+          PY

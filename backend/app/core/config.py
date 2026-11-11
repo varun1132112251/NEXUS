@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     database_url: str = "postgresql+psycopg://nexus:nexus@localhost:5432/nexus"
     jwt_secret_key: str
+    activity_source_hmac_key: str | None = None
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
     auth_ticket_expire_minutes: int = 10
