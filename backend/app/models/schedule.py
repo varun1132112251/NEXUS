@@ -1,7 +1,7 @@
 from datetime import UTC, date, datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, ForeignKeyConstraint, Integer, String, Text, UniqueConstraint, Uuid, text
+from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, String, Text, UniqueConstraint, Uuid, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -21,7 +21,14 @@ class ScheduleItem(Base):
         ForeignKeyConstraint(["habit_id", "user_id"], ["habits.id", "habits.user_id"], name="fk_schedule_items_habit_user"),
         ForeignKeyConstraint(["project_id", "user_id"], ["projects.id", "projects.user_id"], name="fk_schedule_items_project_user"),
         ForeignKeyConstraint(["target_id", "user_id"], ["targets.id", "targets.user_id"], name="fk_schedule_items_target_user"),
+        ForeignKeyConstraint(["routine_template_id", "user_id"], ["routine_templates.id", "routine_templates.user_id"], name="fk_schedule_items_routine_user"),
+        ForeignKeyConstraint(["ambition_goal_id", "user_id"], ["ambition_goals.id", "ambition_goals.user_id"], name="fk_schedule_items_ambition_goal_user"),
         CheckConstraint("end_at > start_at", name="ck_schedule_items_time_range"),
+        CheckConstraint("status IN ('planned', 'partial', 'completed', 'skipped', 'missed', 'cancelled')", name="ck_schedule_items_status"),
+        CheckConstraint("priority BETWEEN 1 AND 5", name="ck_schedule_items_priority"),
+        Index("ix_schedule_items_user_live_date", "user_id", "scheduled_date", postgresql_where=text("deleted_at IS NULL")),
+        Index("ix_schedule_items_user_live_start", "user_id", "start_at", "end_at", postgresql_where=text("deleted_at IS NULL")),
+        Index("uq_schedule_routine_occurrence", "routine_template_id", "scheduled_date", unique=True, postgresql_where=text("routine_template_id IS NOT NULL")),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
@@ -30,6 +37,8 @@ class ScheduleItem(Base):
     habit_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True, index=True)
     project_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True, index=True)
     target_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True, index=True)
+    routine_template_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True, index=True)
+    ambition_goal_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     scheduled_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
@@ -39,3 +48,4 @@ class ScheduleItem(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="planned", server_default="planned")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, server_default=text("CURRENT_TIMESTAMP"))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now, server_default=text("CURRENT_TIMESTAMP"))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

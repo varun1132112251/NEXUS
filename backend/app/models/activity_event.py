@@ -38,6 +38,7 @@ class ActivityEvent(Base):
             "external_event_id",
             name="uq_activity_events_source_external_event",
         ),
+        UniqueConstraint("id", "user_id", name="uq_activity_events_id_user_id"),
         CheckConstraint(
             "confidence >= 0 AND confidence <= 1",
             name="ck_activity_events_confidence",
@@ -61,6 +62,7 @@ class ActivityEvent(Base):
     payload: Mapped[dict] = mapped_column(
         JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
     )
+    discarded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now, server_default=text("CURRENT_TIMESTAMP")
     )

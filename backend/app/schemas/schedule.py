@@ -1,7 +1,10 @@
 from datetime import date, datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+ScheduleStatus = Literal["planned", "partial", "completed", "skipped", "missed", "cancelled"]
 
 
 class ScheduleItemCreate(BaseModel):
@@ -14,15 +17,15 @@ class ScheduleItemCreate(BaseModel):
     habit_id: UUID | None = None
     project_id: UUID | None = None
     target_id: UUID | None = None
+    routine_template_id: UUID | None = None
+    ambition_goal_id: UUID | None = None
     priority: int = Field(default=3, ge=1, le=5)
-    status: str = Field(default="planned", min_length=1, max_length=32)
+    status: ScheduleStatus = "planned"
 
     @model_validator(mode="after")
     def validate_times(self):
         if self.end_at <= self.start_at:
             raise ValueError("end_at must be after start_at.")
-        if self.start_at.date() != self.scheduled_date or self.end_at.date() != self.scheduled_date:
-            raise ValueError("start_at and end_at must match scheduled_date.")
         return self
 
 
@@ -36,8 +39,10 @@ class ScheduleItemUpdate(BaseModel):
     habit_id: UUID | None = None
     project_id: UUID | None = None
     target_id: UUID | None = None
+    routine_template_id: UUID | None = None
+    ambition_goal_id: UUID | None = None
     priority: int | None = Field(default=None, ge=1, le=5)
-    status: str | None = Field(default=None, min_length=1, max_length=32)
+    status: ScheduleStatus | None = None
 
     @model_validator(mode="after")
     def validate_times(self):
@@ -47,11 +52,6 @@ class ScheduleItemUpdate(BaseModel):
         scheduled_date = values.get("scheduled_date")
         if start is not None and end is not None and end <= start:
             raise ValueError("end_at must be after start_at.")
-        if scheduled_date is not None:
-            if start is not None and start.date() != scheduled_date:
-                raise ValueError("start_at must match scheduled_date.")
-            if end is not None and end.date() != scheduled_date:
-                raise ValueError("end_at must match scheduled_date.")
         return self
 
 
@@ -63,6 +63,8 @@ class ScheduleItemRead(BaseModel):
     habit_id: UUID | None
     project_id: UUID | None
     target_id: UUID | None
+    routine_template_id: UUID | None
+    ambition_goal_id: UUID | None
     title: str
     notes: str | None
     scheduled_date: date
@@ -72,3 +74,14 @@ class ScheduleItemRead(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
+    deleted_at: datetime | None = None
+
+
+class ScheduleStatusEventRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    schedule_item_id: UUID
+    previous_status: str | None
+    new_status: str
+    event_kind: str
+    created_at: datetime

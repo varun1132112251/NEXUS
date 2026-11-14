@@ -37,8 +37,18 @@ class ActivityGoalContribution(Base):
             name="fk_activity_goal_contributions_session_user",
         ),
         ForeignKeyConstraint(
+            ["activity_record_id", "user_id"],
+            ["activity_records.id", "activity_records.user_id"],
+            ondelete="RESTRICT",
+            name="fk_activity_goal_contributions_record_user",
+        ),
+        ForeignKeyConstraint(
             ["target_id", "user_id"], ["targets.id", "targets.user_id"],
             name="fk_activity_goal_contributions_target_user",
+        ),
+        ForeignKeyConstraint(
+            ["goal_id", "user_id"], ["ambition_goals.id", "ambition_goals.user_id"],
+            name="fk_activity_goal_contributions_goal_user",
         ),
         UniqueConstraint("id", "user_id", name="uq_activity_goal_contributions_id_user_id"),
         CheckConstraint(
@@ -55,34 +65,46 @@ class ActivityGoalContribution(Base):
             "(contribution_type = 'milestone' AND unit IS NULL)",
             name="ck_activity_goal_contributions_unit_type",
         ),
+        CheckConstraint(
+            "((activity_session_id IS NOT NULL AND activity_record_id IS NULL) OR "
+            "(activity_session_id IS NULL AND activity_record_id IS NOT NULL)) AND "
+            "(contribution_type <> 'time' OR activity_session_id IS NOT NULL)",
+            name="ck_activity_goal_contributions_source",
+        ),
+        CheckConstraint("(target_id IS NOT NULL AND goal_id IS NULL) OR (target_id IS NULL AND goal_id IS NOT NULL)", name="ck_activity_goal_contributions_destination"),
         Index(
             "uq_activity_goal_contributions_session_target_time",
             "activity_session_id",
             "target_id",
             unique=True,
-            postgresql_where=text("contribution_type = 'time'"),
+            postgresql_where=text("contribution_type = 'time' AND reversed_at IS NULL"),
         ),
         Index(
             "ix_activity_goal_contributions_user_target",
             "user_id",
             "target_id",
         ),
+        Index("ix_activity_goal_contributions_activity_record_id", "activity_record_id"),
+        Index("uq_activity_goal_contributions_session_goal_time", "activity_session_id", "goal_id", unique=True, postgresql_where=text("contribution_type = 'time' AND goal_id IS NOT NULL AND reversed_at IS NULL")),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
     user_id: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    activity_session_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
-    target_id: Mapped[UUID] = mapped_column(
-        Uuid(as_uuid=True), nullable=False, index=True
+    activity_session_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    activity_record_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    target_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), nullable=True, index=True
     )
+    goal_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True, index=True)
     contribution_type: Mapped[str] = mapped_column(String(16), nullable=False)
     contribution_value: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
     unit: Mapped[str | None] = mapped_column(String(32), nullable=True)
     details: Mapped[dict] = mapped_column(
         JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
     )
+    reversed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now, server_default=text("CURRENT_TIMESTAMP")
     )
@@ -134,7 +156,7 @@ BEGIN
     END IF;
     SELECT COALESCE(SUM(c.contribution_value), 0) INTO allocated_duration
       FROM activity_goal_contributions c
-      WHERE c.activity_session_id = affected_session_id AND c.contribution_type = 'time';
+      WHERE c.activity_session_id = affected_session_id AND c.contribution_type = 'time' AND c.reversed_at IS NULL;
     IF allocated_duration > activity_duration THEN
       invalid_session_id := affected_session_id;
       RAISE EXCEPTION 'time allocations exceed activity duration for session %%', invalid_session_id;
@@ -170,7 +192,7 @@ BEGIN
     SELECT duration_seconds INTO changed_duration FROM activity_sessions WHERE id = changed_id;
     SELECT COALESCE(SUM(contribution_value), 0) INTO allocated_duration
       FROM activity_goal_contributions
-      WHERE activity_session_id = changed_id AND contribution_type = 'time';
+      WHERE activity_session_id = changed_id AND contribution_type = 'time' AND reversed_at IS NULL;
     IF (changed_duration IS NULL AND allocated_duration > 0) OR
        allocated_duration > changed_duration THEN
       RAISE EXCEPTION 'new activity duration is below existing time allocations';
@@ -188,15 +210,26 @@ event.listen(ActivityGoalContribution.__table__, "after_create", _allocation_tri
 
 _target_type_trigger = DDL("""
 CREATE FUNCTION nexus_check_activity_contribution_target_type() RETURNS trigger AS $$
-DECLARE target_metric text;
+DECLARE target_metric text; goal_metric text; goal_unit text;
 BEGIN
-  SELECT metric_type INTO target_metric FROM targets WHERE id = NEW.target_id FOR UPDATE;
-  IF NEW.contribution_type = 'time' AND target_metric NOT IN ('time', 'seconds', 'duration') THEN
-    RAISE EXCEPTION 'time contribution requires a time target';
-  ELSIF NEW.contribution_type = 'metric' AND target_metric IN ('time', 'seconds', 'duration') THEN
-    RAISE EXCEPTION 'metric contribution cannot target a time target';
-  ELSIF NEW.contribution_type = 'milestone' AND target_metric <> 'milestones_completed' THEN
-    RAISE EXCEPTION 'milestone contribution requires a milestone target';
+  IF NEW.target_id IS NOT NULL THEN
+    SELECT metric_type INTO target_metric FROM targets WHERE id = NEW.target_id FOR UPDATE;
+    IF NEW.contribution_type = 'time' AND target_metric NOT IN ('time', 'seconds', 'duration') THEN
+      RAISE EXCEPTION 'time contribution requires a time target';
+    ELSIF NEW.contribution_type = 'metric' AND target_metric IN ('time', 'seconds', 'duration') THEN
+      RAISE EXCEPTION 'metric contribution cannot target a time target';
+    ELSIF NEW.contribution_type = 'milestone' AND target_metric <> 'milestones_completed' THEN
+      RAISE EXCEPTION 'milestone contribution requires a milestone target';
+    END IF;
+  ELSE
+    SELECT measurement_type, measurement_unit INTO goal_metric, goal_unit FROM ambition_goals WHERE id = NEW.goal_id FOR UPDATE;
+    IF NEW.contribution_type = 'time' AND (goal_metric <> 'duration' OR NEW.unit <> 'seconds') THEN
+      RAISE EXCEPTION 'time contribution requires a duration goal measured in seconds';
+    ELSIF NEW.contribution_type = 'metric' AND (goal_metric IN ('duration', 'qualitative') OR NEW.unit IS DISTINCT FROM goal_unit) THEN
+      RAISE EXCEPTION 'metric contribution unit must match its ambition goal';
+    ELSIF NEW.contribution_type = 'milestone' AND (goal_metric <> 'count' OR NEW.contribution_value NOT IN (0, 1) OR NEW.unit IS NOT NULL) THEN
+      RAISE EXCEPTION 'milestone contribution requires a count goal and value 0 or 1';
+    END IF;
   END IF;
   RETURN NEW;
 END; $$ LANGUAGE plpgsql;
@@ -220,6 +253,23 @@ END; $$ LANGUAGE plpgsql;
 CREATE TRIGGER trg_target_metric_type_activity_contributions
   BEFORE UPDATE OF metric_type ON targets
   FOR EACH ROW EXECUTE FUNCTION nexus_prevent_incompatible_target_metric_change();
+
+CREATE FUNCTION nexus_prevent_incompatible_ambition_goal_measurement_change() RETURNS trigger AS $$
+BEGIN
+  IF (NEW.measurement_type IS DISTINCT FROM OLD.measurement_type OR NEW.measurement_unit IS DISTINCT FROM OLD.measurement_unit)
+     AND EXISTS (
+       SELECT 1 FROM activity_goal_contributions c WHERE c.goal_id = OLD.id AND (
+         (c.contribution_type = 'time' AND (NEW.measurement_type <> 'duration' OR c.unit <> 'seconds')) OR
+         (c.contribution_type = 'metric' AND (NEW.measurement_type IN ('duration', 'qualitative') OR c.unit IS DISTINCT FROM NEW.measurement_unit))
+       )
+     ) THEN
+    RAISE EXCEPTION 'ambition goal measurement conflicts with existing contributions';
+  END IF;
+  RETURN NEW;
+END; $$ LANGUAGE plpgsql;
+CREATE TRIGGER trg_ambition_goal_measurement_activity_contributions
+  BEFORE UPDATE OF measurement_type, measurement_unit ON ambition_goals
+  FOR EACH ROW EXECUTE FUNCTION nexus_prevent_incompatible_ambition_goal_measurement_change();
 """)
 event.listen(ActivityGoalContribution.__table__, "after_create", _target_type_trigger)
 
@@ -233,9 +283,11 @@ event.listen(
     DROP TRIGGER IF EXISTS trg_activity_contribution_target_type ON activity_goal_contributions;
     DROP TRIGGER IF EXISTS trg_activity_session_duration_allocation_limit ON activity_sessions;
     DROP TRIGGER IF EXISTS trg_target_metric_type_activity_contributions ON targets;
+    DROP TRIGGER IF EXISTS trg_ambition_goal_measurement_activity_contributions ON ambition_goals;
     DROP FUNCTION IF EXISTS nexus_check_activity_time_allocations();
     DROP FUNCTION IF EXISTS nexus_check_activity_session_duration_change();
     DROP FUNCTION IF EXISTS nexus_check_activity_contribution_target_type();
     DROP FUNCTION IF EXISTS nexus_prevent_incompatible_target_metric_change();
+    DROP FUNCTION IF EXISTS nexus_prevent_incompatible_ambition_goal_measurement_change();
     """),
 )

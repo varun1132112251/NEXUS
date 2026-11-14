@@ -43,11 +43,62 @@ def test_activity_migration_clean_upgrade_and_downgrade(monkeypatch):
         config = Config(str(backend_dir / "alembic.ini"))
         command.upgrade(config, "g1a2b3c4d5e6")
         command.upgrade(config, "h7a8b9c0d1e2")
-
+        history_user_id, history_record_id = uuid4(), uuid4()
         verify_engine = create_engine(isolated_url)
+        with verify_engine.begin() as connection:
+            connection.execute(text("""
+                INSERT INTO users (id, username, email, password_hash)
+                VALUES (:id, :username, :email, '')
+            """), {
+                "id": history_user_id,
+                "username": f"history-{history_user_id.hex}",
+                "email": f"{history_user_id.hex}@example.test",
+            })
+            connection.execute(text("""
+                INSERT INTO activity_records (
+                  id, user_id, activity_type, title, details, recorded_at, created_at, updated_at,
+                  metric_value, target_id, contribution_value
+                ) VALUES (
+                  :id, :user_id, 'reading', 'pre-existing record', '{\"pages_read\": 7}'::json,
+                  CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 7, NULL, NULL
+                )
+            """), {"id": history_record_id, "user_id": history_user_id})
+        command.upgrade(config, "i9b2c4d6e8f0")
+        command.upgrade(config, "j2c3d4e5f6a1")
+
         with verify_engine.connect() as connection:
             assert connection.scalar(text("SELECT to_regclass('activity_sources')")) is not None
             assert connection.scalar(text("SELECT to_regclass('activity_events')")) is not None
+            assert connection.scalar(text("SELECT to_regclass('activity_session_events')")) is not None
+            assert connection.scalar(text("SELECT to_regclass('time_session_segments')")) is not None
+            assert connection.scalar(text("SELECT to_regclass('activity_session_lineage')")) is not None
+            assert connection.scalar(text("SELECT to_regclass('ambitions')")) is not None
+            assert connection.scalar(text("SELECT to_regclass('ambition_lifecycle_events')")) is not None
+            assert connection.scalar(text("SELECT to_regclass('ambition_goals')")) is not None
+            assert connection.scalar(text("SELECT to_regclass('ambition_milestones')")) is not None
+            assert connection.scalar(text("SELECT to_regclass('goal_progress_entries')")) is not None
+            assert connection.scalar(text("SELECT count(*) FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='activity_sessions' AND column_name='source_kind'")) == 1
+            history = connection.execute(text("SELECT activity_type, title, details, metric_value FROM activity_records WHERE id=:id"), {"id": history_record_id}).one()
+            assert history.activity_type == "reading" and history.title == "pre-existing record"
+            assert history.details == {"pages_read": 7} and history.metric_value == 7
+
+        ambition_id = uuid4()
+        with verify_engine.begin() as connection:
+            connection.execute(text("""
+                INSERT INTO ambitions (id, user_id, title, category)
+                VALUES (:id, :user_id, 'rollback guard', 'test')
+            """), {"id": ambition_id, "user_id": history_user_id})
+        with pytest.raises(RuntimeError, match="ambition or goal history"):
+            command.downgrade(config, "i9b2c4d6e8f0")
+        with verify_engine.begin() as connection:
+            connection.execute(text("DELETE FROM ambitions WHERE id=:id"), {"id": ambition_id})
+        command.downgrade(config, "i9b2c4d6e8f0")
+        with verify_engine.connect() as connection:
+            assert connection.scalar(text("SELECT to_regclass('ambitions')")) is None
+            assert connection.scalar(text("SELECT to_regclass('ambition_goals')")) is None
+            history = connection.execute(text("SELECT activity_type, title, details, metric_value FROM activity_records WHERE id=:id"), {"id": history_record_id}).one()
+            assert history.activity_type == "reading" and history.title == "pre-existing record"
+            assert history.details == {"pages_read": 7} and history.metric_value == 7
             trigger_count = connection.scalar(text("""
                 SELECT count(*) FROM pg_trigger tr
                 JOIN pg_class tbl ON tbl.oid = tr.tgrelid
@@ -127,6 +178,20 @@ def test_activity_migration_clean_upgrade_and_downgrade(monkeypatch):
             assert connection.scalar(text(
                 "SELECT count(*) FROM activity_goal_contributions WHERE activity_session_id = :id"
             ), {"id": retained_session}) == 1
+
+        with pytest.raises(RuntimeError, match="contributions"):
+            command.downgrade(config, "h7a8b9c0d1e2")
+        with verify_engine.begin() as connection:
+            connection.execute(text("DELETE FROM activity_goal_contributions"))
+
+        command.downgrade(config, "h7a8b9c0d1e2")
+        with verify_engine.connect() as connection:
+            assert connection.scalar(text("SELECT to_regclass('time_session_segments')")) is None
+            assert connection.scalar(text("SELECT to_regclass('activity_session_events')")) is None
+            assert connection.scalar(text("SELECT to_regclass('activity_sources')")) is not None
+            history = connection.execute(text("SELECT activity_type, title, details, metric_value FROM activity_records WHERE id=:id"), {"id": history_record_id}).one()
+            assert history.activity_type == "reading" and history.title == "pre-existing record"
+            assert history.details == {"pages_read": 7} and history.metric_value == 7
 
         command.downgrade(config, "g1a2b3c4d5e6")
         with verify_engine.connect() as connection:

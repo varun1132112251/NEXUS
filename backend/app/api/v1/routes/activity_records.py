@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 from app.api.v1.routes.auth import get_current_user
 from app.db.session import get_db
 from app.models.activity_record import ActivityRecord
+from app.models.activity_goal_contribution import ActivityGoalContribution
+from app.models.activity_session import ActivitySession
 from app.models.habit import Habit
 from app.models.project import Project
 from app.models.task import Task
@@ -105,6 +107,9 @@ def create(
 ):
     target = validate_links(db, payload, user.id)
     if payload.time_session_id is not None:
+        activity_session = db.scalar(select(ActivitySession).where(ActivitySession.user_id == user.id, ActivitySession.time_session_id == payload.time_session_id))
+        if activity_session is not None:
+            raise HTTPException(status_code=409, detail="This stopwatch session is reviewed through the Activity Engine. Add goal contributions to its ActivitySession.")
         existing = db.scalar(select(ActivityRecord).where(ActivityRecord.user_id == user.id, ActivityRecord.time_session_id == payload.time_session_id))
         if existing is not None:
             raise HTTPException(status_code=409, detail="This time session has already been reviewed.")
@@ -122,6 +127,19 @@ def create(
     item_payload.pop("metric_type", None)
     item = ActivityRecord(user_id=user.id, **item_payload)
     db.add(item)
+    if target is not None and payload.metric_value is not None:
+        db.flush()
+        contribution_type = "milestone" if target.metric_type == "milestones_completed" else "metric"
+        contribution = ActivityGoalContribution(
+            user_id=user.id,
+            activity_record_id=item.id,
+            target_id=target.id,
+            contribution_type=contribution_type,
+            contribution_value=payload.metric_value,
+            unit=None if contribution_type == "milestone" else target.metric_type,
+            details={"activity_record_id": str(item.id), "activity_type": item.activity_type},
+        )
+        db.add(contribution)
     try:
         db.commit()
     except IntegrityError as exc:

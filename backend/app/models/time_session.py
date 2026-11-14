@@ -22,14 +22,14 @@ class TimeSession(Base):
         ForeignKeyConstraint(["habit_id", "user_id"], ["habits.id", "habits.user_id"], name="fk_time_sessions_habit_user"),
         ForeignKeyConstraint(["project_id", "user_id"], ["projects.id", "projects.user_id"], name="fk_time_sessions_project_user"),
         ForeignKeyConstraint(["target_id", "user_id"], ["targets.id", "targets.user_id"], name="fk_time_sessions_target_user"),
-        CheckConstraint("status IN ('running', 'completed', 'cancelled')", name="ck_time_sessions_status"),
+        CheckConstraint("status IN ('running', 'paused', 'completed', 'cancelled')", name="ck_time_sessions_status"),
         CheckConstraint("duration_seconds IS NULL OR duration_seconds >= 0", name="ck_time_sessions_duration"),
-        CheckConstraint("(status = 'running' AND ended_at IS NULL AND duration_seconds IS NULL) OR (status = 'completed' AND ended_at IS NOT NULL AND ended_at > started_at AND duration_seconds IS NOT NULL AND duration_seconds >= 0 AND duration_seconds <= floor(extract(epoch FROM (ended_at - started_at)))) OR (status = 'cancelled' AND duration_seconds IS NULL AND (ended_at IS NULL OR ended_at > started_at))", name="ck_time_sessions_status_timing"),
+        CheckConstraint("(status = 'running' AND ended_at IS NULL AND duration_seconds IS NULL) OR (status = 'paused' AND ended_at IS NULL AND duration_seconds IS NOT NULL AND duration_seconds >= 0) OR (status = 'completed' AND ended_at IS NOT NULL AND ended_at > started_at AND duration_seconds IS NOT NULL AND duration_seconds >= 0 AND duration_seconds <= floor(extract(epoch FROM (ended_at - started_at)))) OR (status = 'cancelled' AND duration_seconds IS NULL AND (ended_at IS NULL OR ended_at > started_at))", name="ck_time_sessions_status_timing"),
         Index(
             "uq_time_sessions_one_running_per_user",
             "user_id",
             unique=True,
-            postgresql_where=text("status = 'running'"),
+            postgresql_where=text("status IN ('running', 'paused')"),
         ),
     )
 

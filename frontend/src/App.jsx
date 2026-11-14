@@ -1,5 +1,8 @@
 import AnalyticsView from "./AnalyticsView";
+import ActivityReview from "./ActivityReview";
+import Ambitions from "./Ambitions";
 import ProfileOnboarding from "./ProfileOnboarding";
+import { addCalendarDays, AmbiguousProfileTimeError, isValidTimeZone, profileClock, profileDate, profileDateTimeInput, profileLocalTimeToISO } from "./plannerTimezone.js";
 import React, { useEffect, useMemo, useState } from "react";
 
 const API = `${(import.meta.env.VITE_API_URL || "http://127.0.0.1:8000").replace(/\/+$/, "")}/api/v1`;
@@ -20,11 +23,27 @@ function api(path, options = {}, token) {
         ? detail.map((item) => item?.msg || "Invalid input").join(" ")
         : typeof detail === "string"
           ? detail
-          : `Request failed (${r.status})`;
-      throw new Error(message);
+          : typeof detail?.message === "string"
+            ? detail.message
+            : `Request failed (${r.status})`;
+      const error = new Error(message);
+      error.status = r.status;
+      error.detail = detail;
+      throw error;
     }
     return data;
   });
+}
+
+async function requestScheduleChange(path, options, token, timeZone) {
+  try { return await api(path, options, token); }
+  catch (error) {
+    const conflicts = error.detail?.conflicts;
+    if (error.status !== 409 || !Array.isArray(conflicts) || conflicts.length === 0) throw error;
+    const names = conflicts.map(item => `${item.title} (${profileClock(item.start_at, timeZone)}–${profileClock(item.end_at, timeZone)})`).join("\n");
+    if (!window.confirm(`This block overlaps:\n${names}\n\nKeep both blocks in the planner?`)) throw error;
+    return api(`${path}${path.includes("?") ? "&" : "?"}allow_conflict=true`, options, token);
+  }
 }
 
 const localDate = (d = new Date()) => {
@@ -48,6 +67,17 @@ const isoFromLocal = (value) => {
   const mm = String(Math.abs(offset) % 60).padStart(2, "0");
   return `${value}:00${sign}${hh}:${mm}`;
 };
+
+function plannerInstant(value, timeZone) {
+  try { return profileLocalTimeToISO(value, timeZone); }
+  catch (error) {
+    if (!(error instanceof AmbiguousProfileTimeError)) throw error;
+    const offsets = error.candidates.map(candidate => candidate.offset).join(" or ");
+    const chosen = window.prompt(`${error.message}\nEnter one offset exactly: ${offsets}`);
+    if (!chosen) throw error;
+    return profileLocalTimeToISO(value, timeZone, chosen.trim().toUpperCase());
+  }
+}
 
 
 const inferMetricType = (title = "") => {
@@ -373,11 +403,14 @@ function App() {
   if (profile && !profile.onboarding_completed) {
     return <ProfileOnboarding token={token} onComplete={setProfile} initialProfile={profile} />;
   }
+  if (!profile || !isValidTimeZone(profile.timezone)) {
+    return <main className="auth-shell"><section className="auth-card"><h1>Profile timezone unavailable</h1><p className="muted">Set a valid IANA timezone in your NEXUS profile before planning activities.</p></section></main>;
+  }
 
-  return <Dashboard token={token} onLogout={logout} />;
+  return <Dashboard token={token} profile={profile} onLogout={logout} />;
 }
 
-function Dashboard({ token, onLogout }) {
+function Dashboard({ token, profile, onLogout }) {
   const [view, setView] = useState("Overview");
   const [data, setData] = useState({ analytics: null, schedule: [], current: null, targets: [], habits: [], habitStats: [], history: [], activities: [], routines: [], diary: [] });
   const [loading, setLoading] = useState(true);
@@ -386,9 +419,11 @@ function Dashboard({ token, onLogout }) {
   const emptyActivityForm = { metric_value: "", topic: "", pattern: "", book: "", chapter: "", practice_type: "", workstream: "", milestone: "", accuracy: "", attempted: "", mistakes: "", words_learned: "", key_concepts: "", subject: "", difficulty: "", notes: "" };
   const [activityForm, setActivityForm] = useState(emptyActivityForm);
   const [now, setNow] = useState(Date.now());
-  const [scheduleDate, setScheduleDate] = useState(localDate());
+  const [timerSnapshotAt, setTimerSnapshotAt] = useState(Date.now());
+  const timezone = profile.timezone;
+  const [scheduleDate, setScheduleDate] = useState(() => profileDate(new Date(), timezone));
 
-  const date = localDate();
+  const date = profileDate(new Date(), timezone);
   const month = `${date.slice(0, 7)}-01`;
 
   async function load() {
@@ -407,6 +442,7 @@ function Dashboard({ token, onLogout }) {
         api(`/diary?entry_date=${date}`, {}, token),
       ]);
       setData({ analytics, schedule, current, targets, habits, habitStats, history, activities, routines, diary });
+      setTimerSnapshotAt(Date.now());
       if (current) setTimerTitle(current.title);
     } catch (err) {
       setError(err.message);
@@ -453,8 +489,20 @@ function Dashboard({ token, onLogout }) {
       await api("/time-sessions/" + data.current.id + "/stop", { method: "POST" }, token);
       setActivityForm(emptyActivityForm);
       await load();
-      setView("History");
+      setView("Activity");
     } catch (err) { setError(err.message); }
+  }
+
+  async function pauseTimer() {
+    if (!data.current) return;
+    try { await api(`/time-sessions/${data.current.id}/pause`, { method: "POST" }, token); await load(); }
+    catch (err) { setError(err.message); }
+  }
+
+  async function resumeTimer() {
+    if (!data.current) return;
+    try { await api(`/time-sessions/${data.current.id}/resume`, { method: "POST" }, token); await load(); }
+    catch (err) { setError(err.message); }
   }
 
   async function saveActivity(session, form, metricType) {
@@ -509,13 +557,29 @@ function Dashboard({ token, onLogout }) {
     setData(prev => ({ ...prev, schedule }));
   }
 
+  async function loadScheduleRange(startDate, endDate) {
+    const schedule = await api(`/schedule?start_date=${startDate}&end_date=${endDate}`, {}, token);
+    setData(prev => ({ ...prev, schedule }));
+  }
+
+  async function updateSchedule(item, patch, refreshDate = scheduleDate) {
+    try { await requestScheduleChange(`/schedule/${item.id}`, { method:"PATCH", body:JSON.stringify(patch) }, token, timezone); await loadScheduleFor(refreshDate); }
+    catch (err) { setError(err.message); }
+  }
+
+  async function deleteSchedule(item, refreshDate = scheduleDate) {
+    if (!window.confirm(`Remove “${item.title}” from the active planner? Execution history will be preserved.`)) return;
+    try { await api(`/schedule/${item.id}`, { method:"DELETE" }, token); await loadScheduleFor(refreshDate); }
+    catch (err) { setError(err.message); }
+  }
+
   async function createRoutine(form) {
     await api("/routines", { method: "POST", body: JSON.stringify({
       title: form.title, notes: form.notes || null, weekdays: form.weekdays.map(Number),
       start_time: form.start_time, end_time: form.end_time,
       habit_id: form.habit_id || null, target_id: form.target_id || null,
       priority: Number(form.priority), active: true
-    }) }, token);
+    }) }, token, timezone);
     await load();
   }
 
@@ -527,12 +591,14 @@ function Dashboard({ token, onLogout }) {
   }
 
   async function createSchedule(form) {
-    await api("/schedule", { method: "POST", body: JSON.stringify({
+    try { await requestScheduleChange("/schedule", { method: "POST", body: JSON.stringify({
       title: form.title, notes: form.notes || null, scheduled_date: form.scheduled_date,
-      start_at: isoFromLocal(form.start_at), end_at: isoFromLocal(form.end_at),
-      priority: Number(form.priority), target_id: form.target_id || null, status: "planned"
+      start_at: plannerInstant(form.start_at, timezone), end_at: plannerInstant(form.end_at, timezone),
+      priority: Number(form.priority), target_id: form.target_id || null, ambition_goal_id: form.ambition_goal_id || null, status: "planned"
     }) }, token);
-    await loadScheduleFor(form.scheduled_date);
+      await loadScheduleFor(form.scheduled_date);
+      return true;
+    } catch (err) { setError(err.message); return false; }
   }
 
   async function createHabit(form) {
@@ -553,7 +619,7 @@ function Dashboard({ token, onLogout }) {
     await load();
   }
 
-  const actualRunning = data.current ? Math.max(0, Math.floor((now - new Date(data.current.started_at).getTime()) / 1000)) : 0;
+  const actualRunning = data.current ? Math.max(0, (data.current.elapsed_seconds || 0) + (data.current.status === "running" ? Math.floor((now - timerSnapshotAt) / 1000) : 0)) : 0;
   const totals = data.analytics?.totals || {};
   const targets = data.targets.map(t => ({
     ...t, progress_percent: t.target_value ? Math.min(100, t.current_value / t.target_value * 100) : 0
@@ -565,7 +631,7 @@ function Dashboard({ token, onLogout }) {
 
   if (loading) return <div className="loading">Loading NEXUS<span>•</span><span>•</span><span>•</span></div>;
 
-  const nav = ["Overview", "Routine", "Schedule", "Habits", "Targets", "History", "Analytics", "Diary"];
+  const nav = ["Overview", "Ambitions", "Tasks", "Routine", "Schedule", "Habits", "Targets", "History", "Activity", "Analytics", "Diary"];
 
   return <div className="app-shell">
     <aside className="sidebar">
@@ -582,25 +648,92 @@ function Dashboard({ token, onLogout }) {
       </header>
       {error && <div className="error banner">{error}</div>}
 
-      {view === "Overview" && <Overview data={data} targets={targets} actualRunning={actualRunning} timerTitle={timerTitle} setTimerTitle={setTimerTitle} startTimer={startTimer} stopTimer={stopTimer} activityForm={activityForm} setActivityForm={setActivityForm} markSchedule={markSchedule} onTargetChange={updateScheduleTarget} totals={totals} />}
+      {view === "Overview" && <Overview timezone={timezone} data={data} targets={targets} actualRunning={actualRunning} timerTitle={timerTitle} setTimerTitle={setTimerTitle} startTimer={startTimer} pauseTimer={pauseTimer} resumeTimer={resumeTimer} stopTimer={stopTimer} activityForm={activityForm} setActivityForm={setActivityForm} markSchedule={markSchedule} onTargetChange={updateScheduleTarget} totals={totals} />}
+      {view === "Ambitions" && <Ambitions token={token} />}
+      {view === "Tasks" && <TasksView token={token} />}
       {view === "Routine" && <RoutineView date={scheduleDate} routines={data.routines} habits={data.habits} targets={data.targets} onCreate={createRoutine} onGenerate={generateRoutine} />}
-      {view === "Schedule" && <ScheduleView date={scheduleDate} schedule={data.schedule} targets={data.targets} onDateChange={async (next) => { setScheduleDate(next); await loadScheduleFor(next); }} onCreate={createSchedule} onUpdate={(item, status) => markSchedule(item, status, scheduleDate)} onTargetChange={(item, targetId) => updateScheduleTarget(item, targetId, scheduleDate)} onStart={startSchedule} />}
+      {view === "Schedule" && <PlannerView token={token} timezone={timezone} date={scheduleDate} schedule={data.schedule} targets={data.targets} onDateChange={async (next) => { setScheduleDate(next); await loadScheduleFor(next); }} onRangeChange={loadScheduleRange} onCreate={createSchedule} onUpdate={(item, patch) => updateSchedule(item, patch, scheduleDate)} onDelete={item => deleteSchedule(item, scheduleDate)} onStart={startSchedule} />}
       {view === "Habits" && <HabitsView habits={data.habits} habitStats={data.habitStats} onCreate={createHabit} />}
       {view === "Targets" && <TargetsView targets={targets} onCreate={createTarget} onUpdate={updateTarget} onDelete={deleteTarget} />}
       {view === "History" && <HistoryView history={data.history} activities={data.activities} targets={data.targets} habits={data.habits} onReview={saveActivity} />}
-      {view === "Analytics" && <AnalyticsView token={token} />}
+      {view === "Activity" && <ActivityReview token={token} targets={targets} />}
+      {view === "Analytics" && <AnalyticsView token={token} timeZone={timezone} />}
       {view === "Diary" && <DiaryView date={date} existing={data.diary[0]} onSave={createDiary} />}
     </main>
   </div>;
 }
 
-function Overview({ data, targets, actualRunning, timerTitle, setTimerTitle, startTimer, stopTimer, activityForm, setActivityForm, markSchedule, onTargetChange, totals }) {
+function TasksView({ token }) {
+  const [tasks, setTasks] = useState([]);
+  const [goals, setGoals] = useState([]);
+  const [projects, setProjects] = useState([]);
+  const [filters, setFilters] = useState({ status_filter:"", priority:"", project_id:"", ambition_goal_id:"", due_from:"", due_to:"" });
+  const [form, setForm] = useState({ title:"", description:"", priority:3, due_at:"", project_id:"", ambition_goal_id:"" });
+  const [error, setError] = useState("");
+  const load = async () => {
+    try {
+      const query = new URLSearchParams(Object.entries(filters).filter(([,v]) => v !== "")).toString();
+      const [rows, ambitions, projectRows] = await Promise.all([
+        api(`/tasks${query ? `?${query}` : ""}`, {}, token), api("/ambitions?include_archived=true", {}, token), api("/projects", {}, token)
+      ]);
+      const nested = await Promise.all(ambitions.map(a => api(`/ambitions/${a.id}/goals`, {}, token)));
+      setTasks(rows); setGoals(nested.flat()); setProjects(projectRows);
+    } catch (e) { setError(e.message); }
+  };
+  useEffect(() => { load(); }, [token, JSON.stringify(filters)]);
+  async function create(e) {
+    e.preventDefault(); setError("");
+    try { await api("/tasks", { method:"POST", body:JSON.stringify({ ...form, priority:Number(form.priority), due_at:form.due_at ? new Date(form.due_at).toISOString() : null, project_id:form.project_id || null, ambition_goal_id:form.ambition_goal_id || null }) }, token); setForm({ title:"", description:"", priority:3, due_at:"", project_id:"", ambition_goal_id:"" }); await load(); }
+    catch (err) { setError(err.message); }
+  }
+  async function update(task, patch) {
+    try { await api(`/tasks/${task.id}`, { method:"PATCH", body:JSON.stringify(patch) }, token); await load(); }
+    catch (err) { setError(err.message); }
+  }
+  async function remove(task) {
+    if (!window.confirm(`Archive task “${task.title}”? Its history will be preserved.`)) return;
+    try { await api(`/tasks/${task.id}`, { method:"DELETE" }, token); await load(); } catch (err) { setError(err.message); }
+  }
+  return <section className="two-col">
+    <div className="panel"><PanelTitle eyebrow="TASK MANAGEMENT" title="Create task" />{error && <div className="error">{error}</div>}
+      <form className="form-grid" onSubmit={create}>
+        <label>Title<input value={form.title} onChange={e=>setForm({...form,title:e.target.value})} required maxLength={255}/></label>
+        <label>Description<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label>
+        <label>Priority<select value={form.priority} onChange={e=>setForm({...form,priority:e.target.value})}>{[1,2,3,4,5].map(n=><option key={n}>{n}</option>)}</select></label>
+        <label>Due date<input type="datetime-local" value={form.due_at} onChange={e=>setForm({...form,due_at:e.target.value})}/></label>
+        <label>Project<select value={form.project_id} onChange={e=>setForm({...form,project_id:e.target.value})}><option value="">None</option>{projects.map(p=><option value={p.id} key={p.id}>{p.name}</option>)}</select></label>
+        <label>Long-term goal<select value={form.ambition_goal_id} onChange={e=>setForm({...form,ambition_goal_id:e.target.value})}><option value="">None</option>{goals.map(g=><option value={g.id} key={g.id}>{g.title}</option>)}</select></label>
+        <button className="primary">Create task</button>
+      </form>
+    </div>
+    <div className="panel"><PanelTitle eyebrow="YOUR WORK" title="Tasks" />
+      <div className="form-grid task-filters">
+        <label>Status<select value={filters.status_filter} onChange={e=>setFilters({...filters,status_filter:e.target.value})}><option value="">All</option>{["planned","in_progress","completed","blocked","cancelled"].map(s=><option key={s}>{s}</option>)}</select></label>
+        <label>Priority<select value={filters.priority} onChange={e=>setFilters({...filters,priority:e.target.value})}><option value="">All</option>{[1,2,3,4,5].map(n=><option key={n}>{n}</option>)}</select></label><label>Project<select value={filters.project_id} onChange={e=>setFilters({...filters,project_id:e.target.value})}><option value="">All</option>{projects.map(p=><option value={p.id} key={p.id}>{p.name}</option>)}</select></label><label>Long-term goal<select value={filters.ambition_goal_id} onChange={e=>setFilters({...filters,ambition_goal_id:e.target.value})}><option value="">All</option>{goals.map(g=><option value={g.id} key={g.id}>{g.title}</option>)}</select></label>
+        <label>Due from<input type="date" value={filters.due_from} onChange={e=>setFilters({...filters,due_from:e.target.value})}/></label>
+        <label>Due to<input type="date" value={filters.due_to} onChange={e=>setFilters({...filters,due_to:e.target.value})}/></label>
+      </div>
+      {tasks.length ? <div className="item-list">{tasks.map(task=><TaskRow key={task.id} token={token} task={task} projects={projects} goals={goals} onUpdate={patch=>update(task,patch)} onRemove={()=>remove(task)} />)}</div> : <Empty text="No tasks match these filters." />}
+    </div>
+  </section>;
+}
+
+function TaskRow({ token, task, projects, goals, onUpdate, onRemove }) {
+  const [editing, setEditing] = useState(false);
+  const [history, setHistory] = useState(null);
+  const [form, setForm] = useState({ title:task.title, description:task.description||"", priority:task.priority, due_at:task.due_at?localDateTime(new Date(task.due_at)):"", project_id:task.project_id||"", ambition_goal_id:task.ambition_goal_id||"" });
+  const save = async e => { e.preventDefault(); await onUpdate({ title:form.title, description:form.description||null, priority:Number(form.priority), due_at:form.due_at?new Date(form.due_at).toISOString():null, project_id:form.project_id||null, ambition_goal_id:form.ambition_goal_id||null }); setEditing(false); };
+  if (editing) return <form className="list-item form-grid" onSubmit={save}><label>Title<input required value={form.title} onChange={e=>setForm({...form,title:e.target.value})}/></label><label>Description<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label><label>Priority<select value={form.priority} onChange={e=>setForm({...form,priority:e.target.value})}>{[1,2,3,4,5].map(n=><option key={n}>{n}</option>)}</select></label><label>Due date<input type="datetime-local" value={form.due_at} onChange={e=>setForm({...form,due_at:e.target.value})}/></label><label>Project<select value={form.project_id} onChange={e=>setForm({...form,project_id:e.target.value})}><option value="">None</option>{projects.map(p=><option value={p.id} key={p.id}>{p.name}</option>)}</select></label><label>Long-term goal<select value={form.ambition_goal_id} onChange={e=>setForm({...form,ambition_goal_id:e.target.value})}><option value="">None</option>{goals.map(g=><option value={g.id} key={g.id}>{g.title}</option>)}</select></label><div className="row-actions"><button className="primary">Save</button><button type="button" onClick={()=>setEditing(false)}>Cancel</button></div></form>;
+  return <div className="list-item"><div><strong>{task.title}</strong><span>Priority {task.priority}{task.due_at ? ` · Due ${new Date(task.due_at).toLocaleString()}` : " · No deadline"}{task.project_id ? ` · ${projects.find(p=>p.id===task.project_id)?.name || "Project"}` : ""}{task.ambition_goal_id ? ` · Goal: ${goals.find(g=>g.id===task.ambition_goal_id)?.title || "Linked"}` : ""}</span>{history && <span>{history.map(e=>`${e.previous_status||"created"} → ${e.new_status} · ${new Date(e.created_at).toLocaleString()}`).join(" | ")}</span>}</div><div className="row-actions"><select aria-label={`Status for ${task.title}`} value={task.status} onChange={e=>onUpdate({status:e.target.value})}>{["planned","in_progress","completed","blocked","cancelled"].map(s=><option key={s}>{s}</option>)}</select><button onClick={()=>setEditing(true)}>Edit</button><button onClick={async()=>{if(history===null)setHistory(await api(`/tasks/${task.id}/history`,{},token));else setHistory(null);}}>{history===null?"History":"Hide history"}</button><button className="danger-text" onClick={onRemove}>Archive</button></div></div>;
+}
+
+function Overview({ data, targets, actualRunning, timerTitle, setTimerTitle, startTimer, pauseTimer, resumeTimer, stopTimer, activityForm, setActivityForm, markSchedule, onTargetChange, totals, timezone }) {
   return <>
     <section className="hero-grid">
-      <div className={`timer-card ${data.current ? "running" : ""}`}>
-        <div className="card-top"><span className="eyebrow">FOCUS TIMER</span><span className="live-dot">{data.current ? "RUNNING" : "READY"}</span></div>
+      <div className={`timer-card ${data.current?.status === "running" ? "running" : ""}`}>
+        <div className="card-top"><span className="eyebrow">FOCUS TIMER</span><span className="live-dot">{data.current?.status?.toUpperCase() || "READY"}</span></div>
         <div className="timer-value">{formatSeconds(data.current ? actualRunning : 0)}</div>
-        {data.current ? <><div className="timer-title">{data.current.title}</div><p className="muted small">Time is tracked automatically. Review what you accomplished after stopping.</p><button className="danger full" onClick={stopTimer}>Stop session</button></>
+        {data.current ? <><div className="timer-title">{data.current.title}</div><p className="muted small">Paused intervals are excluded. Review the completed session in Activity.</p><div className="row-actions">{data.current.status === "running" ? <button onClick={pauseTimer}>Pause</button> : <button className="primary" onClick={resumeTimer}>Resume</button>}<button className="danger" onClick={stopTimer}>Stop session</button></div></>
           : <div className="timer-start"><input placeholder="What are you working on?" value={timerTitle} onChange={e => setTimerTitle(e.target.value)} onKeyDown={e => e.key === "Enter" && startTimer()} /><button className="primary" onClick={startTimer}>Start</button></div>}
       </div>
       <div className="stat-card"><span className="eyebrow">FOCUSED TODAY</span><strong>{formatSeconds(totals.actual_seconds)}</strong><p>Actual tracked time</p></div>
@@ -610,7 +743,7 @@ function Overview({ data, targets, actualRunning, timerTitle, setTimerTitle, sta
     <section className="content-grid">
       <div className="panel schedule-panel"><div className="panel-head"><div><span className="eyebrow">TODAY</span><h3>Execution schedule</h3></div><span className="count">{data.schedule.length}</span></div>
         {data.schedule.length === 0 ? <Empty text="Nothing scheduled yet. Use Schedule to plan your day." /> : <div className="schedule-list">{data.schedule.map(item => <div className={`schedule-row ${item.status}`} key={item.id}>
-          <div className="time">{formatClock(item.start_at)}<small>{formatClock(item.end_at)}</small></div>
+          <div className="time">{profileClock(item.start_at,timezone)}<small>{profileClock(item.end_at,timezone)}</small></div>
           <div className="schedule-info"><strong>{item.title}</strong><span>{item.notes || "Focus block"}</span><select className="schedule-target" value={item.target_id || ""} onChange={e => onTargetChange(item, e.target.value)}><option value="">No target</option>{targets.map(t => <option key={t.id} value={t.id}>{t.title} · {METRIC_LABELS[t.metric_type] || t.metric_type}</option>)}</select></div>
           <div className="row-actions">{(item.status === "planned" || item.status === "partial") && <><button onClick={() => markSchedule(item, "completed")}>Done</button>{item.status === "planned" && <button onClick={() => markSchedule(item, "skipped")}>Skip</button>}</>}</div>
         </div>)}</div>}
@@ -620,7 +753,7 @@ function Overview({ data, targets, actualRunning, timerTitle, setTimerTitle, sta
       </div>
     </section>
     <section className="panel metrics"><div className="panel-head"><div><span className="eyebrow">TODAY</span><h3>Operating pulse</h3></div></div>
-      <div className="metric-grid"><Metric label="Activities" value={totals.activity_count || 0} /><Metric label="Sessions" value={totals.session_count || 0} /><Metric label="Diary" value={totals.diary_days || 0} /><Metric label="Skipped" value={totals.skipped_items || 0} /></div>
+      <div className="metric-grid"><Metric label="Manual activity records" value={totals.activity_count || 0} /><Metric label="Confirmed sessions" value={totals.session_count || 0} /><Metric label="Diary" value={totals.diary_days || 0} /><Metric label="Skipped" value={totals.skipped_items || 0} /></div>
     </section>
   </>;
 }
@@ -746,17 +879,56 @@ function RoutineRow({ routine, days, habits, targets }) {
   return <div className="routine-row"><div className="routine-days">{dayLabel.map((day,index)=><span className="routine-day active" key={index}>{day}</span>)}</div><div className="schedule-info"><strong>{routine.title}</strong><span>{routine.start_time.slice(0,5)}–{routine.end_time.slice(0,5)} · {routine.habit_id?"Habit linked":"Routine block"}{routine.target_id?" · Target linked":""}</span></div><div className="row-actions"><button onClick={()=>setEditing(true)}>Edit</button><button className="danger-text" onClick={remove}>Delete</button></div></div>;
 }
 
-function ScheduleView({ date, schedule, targets, onDateChange, onCreate, onUpdate, onTargetChange, onStart }) {
+function PlannerView({ token, timezone, date, schedule, targets, onDateChange, onRangeChange, onCreate, onUpdate, onDelete, onStart }) {
+  const [mode, setMode] = useState("day");
+  const [editing, setEditing] = useState(null);
+  const [editForm, setEditForm] = useState({});
+  const [form, setForm] = useState({ title:"", notes:"", scheduled_date:date, start_at:`${date}T18:00`, end_at:`${date}T19:00`, priority:3, target_id:"", ambition_goal_id:"" });
+  const [goals, setGoals] = useState([]);
+  const [execution, setExecution] = useState({ items: [], totals: null });
+  const [plannerError, setPlannerError] = useState("");
+  useEffect(()=>setForm(v=>({...v,scheduled_date:date,start_at:`${date}T18:00`,end_at:`${date}T19:00`})),[date]);
+  const weekStart=(()=>{const [year,month,day]=date.split("-").map(Number);const d=new Date(Date.UTC(year,month-1,day));return addCalendarDays(date,-((d.getUTCDay()+6)%7));})();
+  const weekEnd=addCalendarDays(weekStart,6);
+  useEffect(()=>{if(mode==="week")onRangeChange(weekStart,weekEnd);else onDateChange(date);},[mode,date]);
+  useEffect(()=>{let live=true;api("/ambitions?include_archived=false",{},token).then(async rows=>{const all=await Promise.all(rows.map(a=>api(`/ambitions/${a.id}/goals`,{},token)));if(live)setGoals(all.flat());}).catch(()=>{});return()=>{live=false;};},[token]);
+  useEffect(()=>{const start=mode==="week"?weekStart:date,end=mode==="week"?weekEnd:date;api(`/schedule/execution?start_date=${start}&end_date=${end}`,{},token).then(setExecution).catch(()=>setExecution({items:[],totals:null}));},[mode,date,token]);
+  const shift=delta=>onDateChange(addCalendarDays(mode==="week"?weekStart:date,delta*(mode==="week"?7:1)));
+  const updateBlock=async(item,patch)=>{await onUpdate(item,patch);if(mode==="week")await onRangeChange(weekStart,weekEnd);};
+  const deleteBlock=async item=>{await onDelete(item);if(mode==="week")await onRangeChange(weekStart,weekEnd);};
+  const days=Array.from({length:7},(_,i)=>{const key=addCalendarDays(weekStart,i);const d=new Date(`${key}T12:00:00Z`);return {key,label:new Intl.DateTimeFormat(undefined,{timeZone:"UTC",weekday:"long",month:"short",day:"numeric"}).format(d),items:schedule.filter(item=>item.scheduled_date===key)}});
+  const create=async e=>{e.preventDefault();setPlannerError("");const result=await onCreate(form);if(result!==false)setForm(v=>({...v,title:"",notes:"",target_id:"",ambition_goal_id:""}));};
+  const startEdit=item=>{setPlannerError("");setEditing(item.id);setEditForm({title:item.title,notes:item.notes||"",scheduled_date:item.scheduled_date,start_at:profileDateTimeInput(item.start_at,timezone),end_at:profileDateTimeInput(item.end_at,timezone),target_id:item.target_id||"",ambition_goal_id:item.ambition_goal_id||"",priority:item.priority});};
+  const save=async item=>{try{setPlannerError("");await onUpdate(item,{title:editForm.title,notes:editForm.notes||null,scheduled_date:editForm.scheduled_date,start_at:plannerInstant(editForm.start_at,timezone),end_at:plannerInstant(editForm.end_at,timezone),target_id:editForm.target_id||null,ambition_goal_id:editForm.ambition_goal_id||null,priority:Number(editForm.priority)});setEditing(null);if(editForm.scheduled_date!==date)onDateChange(editForm.scheduled_date);else if(mode==="week")await onRangeChange(weekStart,weekEnd);}catch(error){setPlannerError(error.message);}};
+  const card=(item)=> <div className={`schedule-row ${item.status}`} key={item.id}>
+    {editing===item.id ? <div className="form-grid schedule-edit"><label>Title<input value={editForm.title} onChange={e=>setEditForm({...editForm,title:e.target.value})}/></label><label>Date<input type="date" value={editForm.scheduled_date} onChange={e=>setEditForm({...editForm,scheduled_date:e.target.value})}/></label><label>Start<input type="datetime-local" value={editForm.start_at} onChange={e=>setEditForm({...editForm,start_at:e.target.value})}/></label><label>End<input type="datetime-local" value={editForm.end_at} onChange={e=>setEditForm({...editForm,end_at:e.target.value})}/></label><label>Notes<textarea value={editForm.notes} onChange={e=>setEditForm({...editForm,notes:e.target.value})}/></label><label>Target<select value={editForm.target_id} onChange={e=>setEditForm({...editForm,target_id:e.target.value})}><option value="">None</option>{targets.map(t=><option key={t.id} value={t.id}>{t.title}</option>)}</select></label><label>Long-term goal<select value={editForm.ambition_goal_id} onChange={e=>setEditForm({...editForm,ambition_goal_id:e.target.value})}><option value="">None</option>{goals.map(g=><option key={g.id} value={g.id}>{g.title}</option>)}</select></label><label>Priority<select value={editForm.priority} onChange={e=>setEditForm({...editForm,priority:e.target.value})}>{[1,2,3,4,5].map(n=><option key={n}>{n}</option>)}</select></label><div className="row-actions"><button className="primary" onClick={()=>save(item)}>Save</button><button onClick={()=>setEditing(null)}>Cancel</button></div></div> : <><div className="time">{profileClock(item.start_at,timezone)}<small>{profileClock(item.end_at,timezone)}</small></div><div className="schedule-info"><strong>{item.title}</strong><span>{item.status}{item.target_id?" · Target linked":""}{item.routine_template_id&&<span>Routine occurrence</span>}</span><span>Confirmed actual {formatSeconds(execution.items.find(x=>x.schedule_item.id===item.id)?.confirmed_actual_seconds||0)} · Ambiguous {formatSeconds(execution.items.find(x=>x.schedule_item.id===item.id)?.ambiguous_actual_seconds||0)} · Outside planned {formatSeconds(execution.items.find(x=>x.schedule_item.id===item.id)?.outside_planned_seconds||0)}</span></div><div className="row-actions">{(item.status==="planned"||item.status==="partial")&&<><button onClick={()=>onStart(item)}>Start</button><button onClick={()=>updateBlock(item,{status:"completed"})}>Done</button><button onClick={()=>updateBlock(item,{status:"skipped"})}>Skip</button></>}<button onClick={()=>startEdit(item)}>Edit/Move</button><button className="danger-text" onClick={()=>deleteBlock(item)}>Delete</button></div></>}
+  </div>;
+  return <section className="two-col"><div className="panel">{plannerError&&<div className="error banner">{plannerError}</div>}<PanelTitle eyebrow="PLAN" title="Add schedule block"/><form className="form-grid" onSubmit={create}><label>Title<input required value={form.title} onChange={e=>setForm({...form,title:e.target.value})}/></label><label>Notes<textarea value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/></label><label>Date<input type="date" value={form.scheduled_date} onChange={e=>setForm({...form,scheduled_date:e.target.value,start_at:`${e.target.value}T18:00`,end_at:`${e.target.value}T19:00`})}/></label><label>Start<input type="datetime-local" value={form.start_at} onChange={e=>setForm({...form,start_at:e.target.value})}/></label><label>End<input type="datetime-local" value={form.end_at} onChange={e=>setForm({...form,end_at:e.target.value})}/></label><label>Target<select value={form.target_id} onChange={e=>setForm({...form,target_id:e.target.value})}><option value="">None</option>{targets.map(t=><option key={t.id} value={t.id}>{t.title}</option>)}</select></label><label>Long-term goal<select value={form.ambition_goal_id} onChange={e=>setForm({...form,ambition_goal_id:e.target.value})}><option value="">None</option>{goals.map(g=><option key={g.id} value={g.id}>{g.title}</option>)}</select></label><label>Priority<select value={form.priority} onChange={e=>setForm({...form,priority:e.target.value})}>{[1,2,3,4,5].map(n=><option key={n}>{n}</option>)}</select></label><button className="primary">Add to schedule</button></form></div>
+    <div className="panel"><div className="panel-head"><div><span className="eyebrow">{mode==="week"?`${weekStart} — ${weekEnd}`:date}</span><h3>{mode==="week"?"Weekly timetable":"Daily plan"}</h3><p className="muted small">{mode==="week"?"Planned duration by date; actual duration uses confirmed activity evidence.":new Intl.DateTimeFormat(undefined,{timeZone:"UTC",weekday:"long",month:"short",day:"numeric",year:"numeric"}).format(new Date(`${date}T12:00:00Z`))}</p></div><div className="date-nav"><button type="button" className={mode==="day"?"primary":"ghost"} onClick={()=>setMode("day")}>Day</button><button type="button" className={mode==="week"?"primary":"ghost"} onClick={()=>setMode("week")}>Week</button><button type="button" className="ghost small-btn" onClick={()=>shift(-1)}>←</button><button type="button" className="ghost small-btn" onClick={()=>shift(1)}>→</button></div></div>
+      {mode==="day" ? schedule.length? <div className="schedule-list">{schedule.map(card)}</div>:<Empty text="No blocks planned."/> : <><p className="muted small">Confirmed actual across this week: {formatSeconds(execution.totals?.confirmed_actual_seconds || 0)} · {formatSeconds(execution.totals?.ambiguous_actual_seconds || 0)} ambiguous with planned intervals.{execution.totals?.unavailable_legacy_seconds ? ` ${formatSeconds(execution.totals.unavailable_legacy_seconds)} legacy stopwatch time unavailable.` : ""}</p><div className="week-grid">{days.map(day=>{const planned=day.items.filter(x=>x.status!=="cancelled").reduce((s,x)=>s+Math.max(0,(new Date(x.end_at)-new Date(x.start_at))/1000),0);return <article className="week-day" key={day.key}><button className="week-day-title" onClick={()=>{setMode("day");onDateChange(day.key);}}>{day.label}</button><p className="muted small">Planned {formatSeconds(planned)}</p>{day.items.length?day.items.map(card):<span className="muted small">No blocks planned</span>}</article>})}</div></>}
+    </div></section>;
+}
+
+function ScheduleView({ date, schedule, targets, onDateChange, onRangeChange, onCreate, onUpdate, onDelete, onStart, timezone }) {
+  const [mode, setMode] = useState("day");
+  const [editingId, setEditingId] = useState(null);
+  const [edit, setEdit] = useState({});
   const [form, setForm] = useState({ title: "", notes: "", scheduled_date: date, start_at: `${date}T18:00`, end_at: `${date}T19:00`, priority: 3, target_id: "" });
   useEffect(() => {
     setForm(prev => ({ ...prev, scheduled_date: date, start_at: `${date}T18:00`, end_at: `${date}T19:00` }));
   }, [date]);
   const shiftDate = (days) => {
-    const d = new Date(`${date}T12:00:00`);
-    d.setDate(d.getDate() + days);
-    onDateChange(localDate(d));
+    onDateChange(addCalendarDays(date, days));
   };
-  const dateLabel = new Date(`${date}T12:00:00`).toLocaleDateString([], { weekday: "long", month: "short", day: "numeric", year: "numeric" });
+  const dateLabel = new Intl.DateTimeFormat(undefined, { timeZone: "UTC", weekday: "long", month: "short", day: "numeric", year: "numeric" }).format(new Date(`${date}T12:00:00Z`));
+  const weekStart = (() => { const [year,month,day]=date.split("-").map(Number); const d=new Date(Date.UTC(year,month-1,day)); return addCalendarDays(date,-((d.getUTCDay()+6)%7)); })();
+  const weekEnd = addCalendarDays(weekStart, 6);
+  useEffect(() => { if (mode === "week") onRangeChange(weekStart, weekEnd); else onDateChange(date); }, [mode, date]);
+  const shift = delta => onDateChange(addCalendarDays(mode === "week" ? weekStart : date, delta * (mode === "week" ? 7 : 1)));
+  const startEdit = item => { setEditingId(item.id); setEdit({ title:item.title, notes:item.notes||"", date:item.scheduled_date, start:profileDateTimeInput(item.start_at,timezone), end:profileDateTimeInput(item.end_at,timezone), target_id:item.target_id||"" }); };
+  const saveEdit = async item => { await onUpdate(item, { title:edit.title, notes:edit.notes||null, scheduled_date:edit.date, start_at:plannerInstant(edit.start,timezone), end_at:plannerInstant(edit.end,timezone), target_id:edit.target_id||null }); setEditingId(null); };
+  const blocks = mode === "week" ? schedule.filter(item=>item.scheduled_date>=weekStart&&item.scheduled_date<=weekEnd) : schedule;
+  const days = Array.from({length:7},(_,n)=>{const key=addCalendarDays(weekStart,n);const d=new Date(`${key}T12:00:00Z`);return {key,label:new Intl.DateTimeFormat(undefined,{timeZone:"UTC",weekday:"long",month:"short",day:"numeric"}).format(d),items:blocks.filter(item=>item.scheduled_date===key)}});
   const submit = async e => { e.preventDefault(); await onCreate(form); setForm({ ...form, title: "", notes: "", target_id: "" }); };
   return <section className="two-col"><div className="panel"><PanelTitle eyebrow="PLAN" title="Add schedule block" /><form className="form-grid" onSubmit={submit}>
     <label>Title<input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} required /></label>
@@ -765,7 +937,7 @@ function ScheduleView({ date, schedule, targets, onDateChange, onCreate, onUpdat
     <div className="inline-fields"><label>Start<input type="datetime-local" value={form.start_at} onChange={e => setForm({ ...form, start_at:e.target.value })} required /></label><label>End<input type="datetime-local" value={form.end_at} onChange={e => setForm({ ...form, end_at:e.target.value })} required /></label></div>
     <label>Target<select value={form.target_id} onChange={e => setForm({ ...form, target_id:e.target.value })}><option value="">No target</option>{targets.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}</select></label><label>Priority<select value={form.priority} onChange={e => setForm({ ...form, priority:e.target.value })}><option value="1">1 — Critical</option><option value="2">2 — High</option><option value="3">3 — Normal</option><option value="4">4 — Low</option><option value="5">5 — Lowest</option></select></label>
     <button className="primary">Add to schedule</button>
-  </form></div><div className="panel"><div className="panel-head"><div><span className="eyebrow">{date}</span><h3>{date === localDate() ? "Today’s plan" : "Planned execution"}</h3><p className="muted small">{dateLabel}</p></div><div className="date-nav"><button className="ghost small-btn" type="button" onClick={() => shiftDate(-1)}>←</button><button className="ghost small-btn" type="button" onClick={() => shiftDate(1)}>→</button></div></div><div className="schedule-list">{schedule.length ? schedule.map(item => <div className={`schedule-row ${item.status}`} key={item.id}><div className="time">{formatClock(item.start_at)}<small>{formatClock(item.end_at)}</small></div><div className="schedule-info"><strong>{item.title}</strong><span>{item.notes || "Focus block"}{item.target_id && " · Target linked"}{item.status === "partial" && " · Partial"}</span></div><div className="row-actions">{(item.status === "planned" || item.status === "partial") && <><button onClick={() => onStart(item)}>Start</button><button onClick={() => onUpdate(item,"completed")}>Done</button>{item.status === "planned" && <button onClick={() => onUpdate(item,"skipped")}>Skip</button>}</>}</div></div>) : <Empty text="No blocks planned." />}</div></div></section>;
+  </form></div><div className="panel"><div className="panel-head"><div><span className="eyebrow">{date}</span><h3>{date === localDate() ? "Today’s plan" : "Planned execution"}</h3><p className="muted small">{dateLabel}</p></div><div className="date-nav"><button className="ghost small-btn" type="button" onClick={() => shiftDate(-1)}>←</button><button className="ghost small-btn" type="button" onClick={() => shiftDate(1)}>→</button></div></div><div className="schedule-list">{schedule.length ? schedule.map(item => <div className={`schedule-row ${item.status}`} key={item.id}><div className="time">{profileClock(item.start_at,timezone)}<small>{profileClock(item.end_at,timezone)}</small></div><div className="schedule-info"><strong>{item.title}</strong><span>{item.notes || "Focus block"}{item.target_id && " · Target linked"}{item.status === "partial" && " · Partial"}</span></div><div className="row-actions">{(item.status === "planned" || item.status === "partial") && <><button onClick={() => onStart(item)}>Start</button><button onClick={() => onUpdate(item,"completed")}>Done</button>{item.status === "planned" && <button onClick={() => onUpdate(item,"skipped")}>Skip</button>}</>}</div></div>) : <Empty text="No blocks planned." />}</div></div></section>;
 }
 
 function HabitsView({ habits, habitStats, onCreate }) {

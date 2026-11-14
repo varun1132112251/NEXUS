@@ -20,6 +20,7 @@ from app.schemas.activity_source import (
     ActivitySourceRegistered,
 )
 from app.services.activity_sources import DuplicateActivityEvent, InvalidDeviceCredential, ingest_device_event
+from app.services.activity_review import draft_from_application_end
 
 router = APIRouter(prefix="/activity-sources", tags=["activity-sources"])
 
@@ -102,11 +103,14 @@ def ingest_event(
             confidence=payload.confidence,
             payload=payload.payload,
         )
+        draft_from_application_end(db, event)
         db.commit()
         db.refresh(event)
         return ActivityEventIngested(event=event, duplicate=False)
     except DuplicateActivityEvent as exc:
         response.status_code = status.HTTP_200_OK
+        draft_from_application_end(db, exc.event)
+        db.commit()
         db.refresh(exc.event)
         return ActivityEventIngested(event=exc.event, duplicate=True)
     except InvalidDeviceCredential as exc:

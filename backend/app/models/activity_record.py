@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, JSON, String, Text, text
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -14,6 +14,7 @@ def utc_now() -> datetime:
 class ActivityRecord(Base):
     __tablename__ = "activity_records"
     __table_args__ = (
+        UniqueConstraint("id", "user_id", name="uq_activity_records_id_user_id"),
         Index(
             "uq_activity_records_time_session_id",
             "time_session_id",
