@@ -107,23 +107,23 @@ def test_period_totals_reconcile_and_goal_history_keeps_corrections_and_reversal
         db.add_all([goal, other_goal])
         db.flush()
 
-        start = datetime(2026, 11, 18, 3, 30, tzinfo=UTC)  # 09:00 in the profile timezone.
+        start = datetime(2026, 11, 14, 3, 30, tzinfo=UTC)  # 09:00 in the profile timezone.
         end = start + timedelta(hours=1)
-        schedule = ScheduleItem(user_id=user.id, title="Reading", scheduled_date=date(2026, 11, 18), start_at=start, end_at=end, status="completed")
+        schedule = ScheduleItem(user_id=user.id, title="Reading", scheduled_date=date(2026, 11, 14), start_at=start, end_at=end, status="completed")
         task = Task(user_id=user.id, title="Read a chapter", due_at=start, status="completed", priority=2)
         session = ActivitySession(user_id=user.id, title="Reading", started_at=start, ended_at=end, duration_seconds=3600, confidence=1, status="confirmed", source_kind="manual")
         corrected = ActivitySession(user_id=user.id, title="Corrected reading", started_at=start + timedelta(minutes=30), ended_at=start + timedelta(minutes=40), duration_seconds=600, confidence=1, status="corrected", source_kind="manual")
-        overnight_start = datetime(2026, 11, 21, 18, tzinfo=UTC)  # 23:30–00:30 in Asia/Kolkata.
+        overnight_start = datetime(2026, 11, 14, 18, tzinfo=UTC)  # 23:30–00:30 in Asia/Kolkata.
         overnight = ActivitySession(user_id=user.id, title="Midnight reading", started_at=overnight_start, ended_at=overnight_start + timedelta(hours=1), duration_seconds=3600, confidence=1, status="confirmed", source_kind="manual")
         db.add_all([schedule, task, session, corrected, overnight])
         db.flush()
         session.schedule_item_id = schedule.id
         corrected.schedule_item_id = schedule.id
-        event_time = datetime(2026, 11, 18, 5, tzinfo=UTC)
+        event_time = datetime(2026, 11, 14, 5, tzinfo=UTC)
         contribution = ActivityGoalContribution(user_id=user.id, activity_session_id=session.id, goal_id=goal.id, contribution_type="metric", contribution_value=Decimal("1"), unit="books", created_at=event_time)
         entry = GoalProgressEntry(user_id=user.id, goal_id=goal.id, numeric_delta=Decimal("1"), resulting_value=Decimal("2"), unit="books", source_kind="activity", source_contribution_id=uuid4(), created_at=event_time)
-        milestone = AmbitionMilestone(user_id=user.id, goal_id=goal.id, title="Finish one book", status="completed", completed_at=date(2026, 11, 18))
-        diary = DiaryEntry(user_id=user.id, entry_date=date(2026, 11, 18), learned="A new idea")
+        milestone = AmbitionMilestone(user_id=user.id, goal_id=goal.id, title="Finish one book", status="completed", completed_at=date(2026, 11, 14))
+        diary = DiaryEntry(user_id=user.id, entry_date=date(2026, 11, 14), learned="A new idea")
         db.add_all([contribution, entry, milestone, diary])
         db.commit()
         correction = GoalProgressEntry(user_id=user.id, goal_id=goal.id, numeric_delta=Decimal("-1"), resulting_value=Decimal("1"), unit="books", source_kind="correction", corrects_entry_id=entry.id, reason="Duplicate progress entry", created_at=event_time + timedelta(minutes=1))
@@ -131,12 +131,12 @@ def test_period_totals_reconcile_and_goal_history_keeps_corrections_and_reversal
         db.add(correction)
         db.commit()
 
-        report = analytics_routes.weekly_report(date(2026, 11, 16), db, user)
+        report = analytics_routes.weekly_report(date(2026, 11, 9), db, user)
         assert report.totals.actual_seconds == sum(day.actual_seconds for day in report.daily) == 7200
         assert report.totals.confirmed_seconds == 7200
         assert report.totals.corrected_seconds == 600
         assert report.totals.ambiguous_actual_seconds == 600
-        execution = analytics_routes.schedule_execution_summary(date(2026, 11, 16), date(2026, 11, 22), db, user)
+        execution = analytics_routes.schedule_execution_summary(date(2026, 11, 9), date(2026, 11, 15), db, user)
         assert report.totals.actual_seconds == execution.totals.confirmed_actual_seconds == 7200
         assert report.totals.planned_seconds == execution.totals.planned_seconds
         assert report.outside_planned_seconds == execution.totals.outside_planned_seconds == 3600
@@ -144,17 +144,17 @@ def test_period_totals_reconcile_and_goal_history_keeps_corrections_and_reversal
         assert report.totals.actual_seconds == sum(item.actual.actual_seconds for item in daily_reports)
         assert report.totals.planned_seconds == sum(item.planned.planned_seconds for item in daily_reports)
         assert report.totals.planned_seconds == sum(day.planned_seconds for day in report.daily) == 3600
-        assert report.days_with_confirmed_or_corrected_activity == 3
+        assert report.days_with_confirmed_or_corrected_activity == 2
         assert report.days_with_planned_activity == 1
         assert report.task_status_transitions["completed"] == 1
         assert report.contribution_count == 1
         assert len(report.progress_entries) == 2
         assert len(report.milestones) == 1
         assert report.reflection_days == 1
-        nov21 = next(item for item in daily_reports if item.date == date(2026, 11, 21))
-        nov22 = next(item for item in daily_reports if item.date == date(2026, 11, 22))
-        assert nov21.actual.actual_seconds == 1800
-        assert nov22.actual.actual_seconds == 1800
+        nov14 = next(item for item in daily_reports if item.date == date(2026, 11, 14))
+        nov15 = next(item for item in daily_reports if item.date == date(2026, 11, 15))
+        assert nov14.actual.actual_seconds == 5400
+        assert nov15.actual.actual_seconds == 1800
         monthly = analytics_routes.monthly_report("2026-11", db, user)
         assert monthly.totals.actual_seconds == sum(day.actual_seconds for day in monthly.daily)
         assert monthly.totals.planned_seconds == sum(day.planned_seconds for day in monthly.daily)
@@ -168,7 +168,7 @@ def test_period_totals_reconcile_and_goal_history_keeps_corrections_and_reversal
         assert weekly_november_actual == monthly.totals.actual_seconds
         assert weekly_november_planned == monthly.totals.planned_seconds
 
-        history = analytics_routes.goal_history(goal.id, date(2026, 11, 16), date(2026, 11, 22), db, user)
+        history = analytics_routes.goal_history(goal.id, date(2026, 11, 9), date(2026, 11, 15), db, user)
         assert history.starting_value is None
         assert history.starting_value_status == "not_recorded"
         assert history.progress_entries[0].resulting_value == "2.0000"
