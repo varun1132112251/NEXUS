@@ -11,13 +11,14 @@ async function request(path, token, options = {}) {
   return body;
 }
 
-export default function Ambitions({ token }) {
+export default function Ambitions({ token, timeZone }) {
   const [ambitions, setAmbitions] = useState([]);
   const [templates, setTemplates] = useState([]);
   const [goals, setGoals] = useState({});
   const [milestones, setMilestones] = useState({});
   const [history, setHistory] = useState({});
   const [lifecycleHistory, setLifecycleHistory] = useState({});
+  const [goalHistory, setGoalHistory] = useState({});
   const [targets, setTargets] = useState([]);
   const [projects, setProjects] = useState([]);
   const [error, setError] = useState("");
@@ -45,14 +46,15 @@ export default function Ambitions({ token }) {
       setGoals(nextGoals);
       const allGoals = Object.values(nextGoals).flat();
       const related = await Promise.all(allGoals.map(async goal => {
-        const [milestoneRows, progressRows] = await Promise.all([
+        const [milestoneRows, historyRow] = await Promise.all([
           request(`/ambitions/goals/${goal.id}/milestones`, token),
-          request(`/ambitions/goals/${goal.id}/progress`, token),
+          request(`/analytics/ambitions/goals/${goal.id}/history`, token),
         ]);
-        return [goal.id, milestoneRows, progressRows];
+        return [goal.id, milestoneRows, historyRow];
       }));
       setMilestones(Object.fromEntries(related.map(([id, value]) => [id, value])));
-      setHistory(Object.fromEntries(related.map(([id, , value]) => [id, value])));
+      setHistory(Object.fromEntries(related.map(([id, , value]) => [id, value.progress_entries || []])));
+      setGoalHistory(Object.fromEntries(related.map(([id, , value]) => [id, value])));
     } catch (err) { setError(err.message); }
   }
   useEffect(() => { load(); }, [token]);
@@ -145,7 +147,7 @@ export default function Ambitions({ token }) {
           {ambition.status === "archived" && <button onClick={() => lifecycle(ambition, "active")}>Restore</button>}
           {ambition.status !== "archived" && <><button disabled={index === 0} onClick={() => reorder(ambition, -1)}>Move up</button><button disabled={index === ambitions.filter(x => x.status !== "archived").length - 1} onClick={() => reorder(ambition, 1)}>Move down</button></>}
         </div>
-        <details><summary>Lifecycle history ({(lifecycleHistory[ambition.id] || []).length})</summary>{(lifecycleHistory[ambition.id] || []).map(row => <span key={row.id}>{row.previous_status} → {row.new_status}{row.reason ? ` · ${row.reason}` : ""} · {new Date(row.created_at).toLocaleString()}</span>)}</details>
+        <details><summary>Lifecycle history ({(lifecycleHistory[ambition.id] || []).length})</summary>{(lifecycleHistory[ambition.id] || []).map(row => <span key={row.id}>{row.previous_status} → {row.new_status}{row.reason ? ` · ${row.reason}` : ""} · {formatHistoryDate(row.created_at, timeZone)}</span>)}</details>
         {(goals[ambition.id] || []).map(goal => <div className="panel" key={goal.id}>
           <div className="panel-head"><div><span className="eyebrow">{goal.measurement_type}{goal.measurement_unit ? ` · ${goal.measurement_unit}` : ""}</span><h3>{goal.title}</h3></div><span>{goal.status} · Priority {goal.priority}</span></div>
           <p>{goal.description || goal.measurement_definition || ""}</p>
@@ -160,7 +162,10 @@ export default function Ambitions({ token }) {
             <div className="inline-fields"><input placeholder="Milestone title" value={milestoneForm[goal.id]?.title || ""} onChange={e => setMilestoneForm(prev => ({ ...prev, [goal.id]: { ...prev[goal.id], title: e.target.value } }))} /><input type="date" value={milestoneForm[goal.id]?.due_date || ""} onChange={e => setMilestoneForm(prev => ({ ...prev, [goal.id]: { ...prev[goal.id], due_date: e.target.value } }))} /><button onClick={() => createMilestone(goal)}>Add milestone</button></div>
           </details>
           <details><summary>Progress history and activity sources ({(history[goal.id] || []).length})</summary>
-            {(history[goal.id] || []).map(entry => <div className="list-item" key={entry.id}><span>{entry.source_kind} · {entry.numeric_delta !== null ? `${entry.numeric_delta} ${entry.unit || ""} → ${entry.resulting_value}` : entry.qualitative_value}{entry.reason ? ` · ${entry.reason}` : ""}{entry.source_contribution_id ? ` · contribution ${entry.source_contribution_id}` : ""} · {new Date(entry.created_at).toLocaleString()}</span>{entry.source_kind !== "correction" && entry.numeric_delta !== null && <button onClick={() => correctProgress(goal, entry)}>Correct</button>}</div>)}
+            <p className="muted small">Starting value: {(goalHistory[goal.id]?.starting_value_status === "recorded") ? goalHistory[goal.id].starting_value : "not recorded"}. Current value is not projected backward.</p>
+            {(history[goal.id] || []).map(entry => <div className="list-item" key={entry.id}><span>{entry.source_kind} · {entry.numeric_delta !== null ? `${entry.numeric_delta} ${entry.unit || ""} → ${entry.resulting_value}` : entry.qualitative_value}{entry.reason ? ` · ${entry.reason}` : ""}{entry.source_contribution_id ? ` · contribution ${entry.source_contribution_id}` : ""} · {formatHistoryDate(entry.created_at, timeZone)}</span>{entry.source_kind !== "correction" && entry.numeric_delta !== null && <button onClick={() => correctProgress(goal, entry)}>Correct</button>}</div>)}
+            {(goalHistory[goal.id]?.contributions || []).map(entry => <div className="list-item" key={`contribution-${entry.id}`}><span>{entry.contribution_type} contribution · {entry.value} {entry.unit || ""}{entry.reversed_at ? " · reversed" : ""} · {formatHistoryDate(entry.recorded_at, timeZone)}</span></div>)}
+            {goalHistory[goal.id]?.limitations?.map(item => <p className="muted small" key={item}>{item}</p>)}
           </details>
           <details><summary>Linked period targets ({targets.filter(target => target.ambition_goal_id === goal.id).length})</summary>
             {targets.filter(target => target.ambition_goal_id === goal.id).map(target => <div className="list-item" key={target.id}><span>{target.period_type} · {target.title} · {target.current_value}/{target.target_value}</span></div>)}
@@ -179,4 +184,9 @@ export default function Ambitions({ token }) {
       </div>
     </div>
   </section>;
+}
+
+function formatHistoryDate(value, timeZone) {
+  if (!value) return "date unavailable";
+  return new Intl.DateTimeFormat(undefined, { timeZone, dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }

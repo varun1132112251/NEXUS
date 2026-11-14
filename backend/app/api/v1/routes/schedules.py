@@ -87,6 +87,16 @@ def execution_summary(
         ActivitySession.started_at < range_end,
         ActivitySession.ended_at > range_start,
     )).all()
+    timer_ids = {activity.time_session_id for activity, _ in rows if activity.time_session_id is not None}
+    segment_rows = list(db.scalars(select(TimeSessionSegment).where(
+        TimeSessionSegment.user_id == user.id,
+        TimeSessionSegment.time_session_id.in_(timer_ids),
+        TimeSessionSegment.ended_at.is_not(None),
+    ).order_by(TimeSessionSegment.started_at, TimeSessionSegment.id)).all()) if timer_ids else []
+    segments_by_timer: dict[UUID, list[tuple[datetime, datetime]]] = {}
+    for segment in segment_rows:
+        if segment.ended_at > segment.started_at:
+            segments_by_timer.setdefault(segment.time_session_id, []).append((segment.started_at, segment.ended_at))
     linked: dict[UUID, list[tuple[datetime, datetime]]] = {block_id: [] for block_id in block_ids}
     linked_counts: dict[UUID, int] = {block_id: 0 for block_id in block_ids}
     unavailable_by_block: dict[UUID, int] = {block_id: 0 for block_id in block_ids}
@@ -97,12 +107,7 @@ def execution_summary(
     for activity, timer_schedule_id in rows:
         intervals = []
         if activity.time_session_id is not None:
-            segments = db.scalars(select(TimeSessionSegment).where(
-                TimeSessionSegment.time_session_id == activity.time_session_id,
-                TimeSessionSegment.user_id == user.id,
-                TimeSessionSegment.ended_at.is_not(None),
-            )).all()
-            intervals = [(segment.started_at, segment.ended_at) for segment in segments if segment.ended_at > segment.started_at]
+            intervals = segments_by_timer.get(activity.time_session_id, [])
             if not intervals and activity.duration_seconds:
                 unavailable_legacy_seconds += activity.duration_seconds
         elif activity.duration_seconds:

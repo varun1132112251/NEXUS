@@ -19,6 +19,7 @@ function AnalyticsView({ token, timeZone }) {
   const [data, setData] = useState(null);
   const [dailyReport, setDailyReport] = useState(null);
   const [dailyError, setDailyError] = useState("");
+  const [periodReport, setPeriodReport] = useState(null);
   const [habitStats, setHabitStats] = useState([]);
   const [habits, setHabits] = useState([]);
   const [error, setError] = useState("");
@@ -33,18 +34,24 @@ function AnalyticsView({ token, timeZone }) {
         setError("");
         setDailyError("");
         setDailyReport(null);
+        setPeriodReport(null);
         setLoading(true);
         const headers = { Authorization: `Bearer ${token}` };
-        const [analyticsResponse, statsResponse, habitsResponse, dailyResponse] = await Promise.all([
+        const periodUrl = preset === "week"
+          ? `${API}/analytics/weekly-report?week_start=${range.start}`
+          : preset === "month" ? `${API}/analytics/monthly-report?month=${range.start.slice(0, 7)}` : null;
+        const [analyticsResponse, statsResponse, habitsResponse, dailyResponse, periodResponse] = await Promise.all([
           fetch(`${API}/analytics/summary?start_date=${range.start}&end_date=${range.end}`, { headers }),
           fetch(`${API}/habits/stats?start_date=${range.start}&end_date=${range.end}`, { headers }),
           fetch(`${API}/habits`, { headers }),
           fetch(`${API}/analytics/daily-report?date=${endDate}`, { headers }),
+          periodUrl ? fetch(periodUrl, { headers }) : Promise.resolve(null),
         ]);
         const body = await analyticsResponse.json().catch(() => null);
         const statsBody = await statsResponse.json().catch(() => null);
         const habitsBody = await habitsResponse.json().catch(() => null);
         const dailyBody = await dailyResponse.json().catch(() => null);
+        const periodBody = periodResponse ? await periodResponse.json().catch(() => null) : null;
         if (!analyticsResponse.ok) throw new Error(body?.detail || `Request failed (${analyticsResponse.status})`);
         if (!statsResponse.ok) throw new Error(statsBody?.detail || `Habit stats request failed (${statsResponse.status})`);
         if (!habitsResponse.ok) throw new Error(habitsBody?.detail || `Habits request failed (${habitsResponse.status})`);
@@ -54,6 +61,7 @@ function AnalyticsView({ token, timeZone }) {
           setHabits(habitsBody || []);
           setDailyReport(dailyResponse.ok ? dailyBody : null);
           setDailyError(dailyResponse.ok ? "" : (dailyBody?.detail || `Daily report request failed (${dailyResponse.status})`));
+          setPeriodReport(periodResponse?.ok ? periodBody : null);
         }
       } catch (err) {
         if (!cancelled) { setError(err.message); setData(null); }
@@ -62,7 +70,7 @@ function AnalyticsView({ token, timeZone }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [token, range.start, range.end, endDate]);
+  }, [token, range.start, range.end, endDate, preset]);
 
   const totals = data?.totals || {};
   const daily = data?.daily || [];
@@ -152,6 +160,43 @@ function AnalyticsView({ token, timeZone }) {
           </div>
         </>}
       </div>
+
+      {preset !== "day" && <div className="panel" style={{ marginTop: "1rem" }}>
+        <PanelTitle eyebrow="HISTORICAL REPORT" title={preset === "week" ? "Calendar week" : "Calendar month"} />
+        {!periodReport ? <Empty text="Historical report is unavailable for this period." /> : <>
+          <p className="muted small">{periodReport.start_date} → {periodReport.end_date} · {periodReport.timezone}. Empty days are shown as unrecorded, not as failure.</p>
+          <div className="metric-grid">
+            <Metric label="Days with confirmed or corrected activity" value={periodReport.days_with_confirmed_or_corrected_activity} />
+            <Metric label="Days with planned activity" value={periodReport.days_with_planned_activity} />
+            <Metric label="Days with no recorded activity" value={periodReport.days_with_no_recorded_activity} />
+            <Metric label="Confirmed / corrected time" value={`${fmt(periodReport.totals.confirmed_seconds)} / ${fmt(periodReport.totals.corrected_seconds)}`} />
+            <Metric label="Overlapping verified time" value={fmt(periodReport.totals.ambiguous_actual_seconds)} />
+            <Metric label="Outside planned blocks" value={fmt(periodReport.outside_planned_seconds)} />
+            <Metric label="Schedule attribution uncertain" value={fmt(periodReport.schedule_ambiguous_seconds)} />
+            <Metric label="Allocation attribution unavailable" value={fmt(periodReport.totals.allocation_attribution_unavailable_seconds)} />
+            <Metric label="Goal/activity contributions" value={periodReport.contribution_count} />
+            <Metric label="Progress entries" value={periodReport.progress_entries.length} />
+            <Metric label="Activity corrections recorded" value={periodReport.activity_correction_count} />
+            <Metric label="Milestones recorded complete" value={periodReport.milestones.length} />
+            <Metric label="Reflection coverage" value={`${periodReport.reflection_coverage_percent}%`} />
+            <Metric label="Draft time (separate)" value={fmt(periodReport.totals.draft_seconds)} />
+          </div>
+          <div className="two-col" style={{ marginTop: "1rem" }}>
+            <div><strong>Period comparison</strong>{Object.entries(periodReport.comparison).map(([key, metric]) => <div className="list-item" key={key}><span>{key.replaceAll("_", " ")}</span><span>{metric.current} current · {metric.previous === null ? "previous unavailable" : `${metric.previous} previous`}{metric.percent_change === null ? "" : ` · ${metric.percent_change}%`}</span></div>)}</div>
+            <div><strong>Daily execution</strong>{periodReport.daily.map(day => <div className="list-item" key={day.date}><span>{day.date}</span><span>{fmt(day.actual_seconds)} confirmed · {fmt(day.planned_seconds)} planned · {fmt(day.draft_seconds)} draft</span></div>)}</div>
+          </div>
+          <div className="two-col" style={{ marginTop: "1rem" }}>
+            <div><strong>Activity distribution</strong>{periodReport.activity_distribution.map(item => <div className="list-item" key={item.key}><span>{item.label} · {item.session_count} sessions</span><span>{fmt(item.seconds)}{item.ambiguous_seconds ? ` · ${fmt(item.ambiguous_seconds)} ambiguous` : ""}</span></div>)}</div>
+            <div><strong>Goal history recorded in this period</strong>
+              {periodReport.contributions.map(item => <div className="list-item" key={`c-${item.id}`}><span>{item.goal_title || item.goal_id || "Goal contribution"} · {item.contribution_type}</span><span>{item.value} {item.unit || ""}{item.reversed_at ? " · reversed" : ""}</span></div>)}
+              {periodReport.progress_entries.map(item => <div className="list-item" key={`p-${item.id}`}><span>{item.goal_title || item.goal_id} · {item.source_kind}{item.corrects_entry_id ? " · correction" : ""}</span><span>{item.numeric_delta || item.qualitative_value || "value unavailable"} {item.unit || ""}</span></div>)}
+              {periodReport.milestones.map(item => <div className="list-item" key={`m-${item.id}`}><span>{item.title}</span><span>completed {item.completed_at || "date unavailable"}</span></div>)}
+              {periodReport.ambition_status_changes.map((item, index) => <div className="list-item" key={`a-${item.ambition_id}-${index}`}><span>Ambition {item.ambition_id.slice(0, 8)} · {item.previous_status} → {item.new_status}</span><span>{item.recorded_at}</span></div>)}
+            </div>
+          </div>
+          {periodReport.history_limitations.map(item => <p className="muted small" key={item}>{item}</p>)}
+        </>}
+      </div>}
 
       <div className="two-col" style={{ marginTop: "1rem" }}>
         <div className="panel">

@@ -649,7 +649,7 @@ function Dashboard({ token, profile, onLogout }) {
       {error && <div className="error banner">{error}</div>}
 
       {view === "Overview" && <Overview timezone={timezone} data={data} targets={targets} actualRunning={actualRunning} timerTitle={timerTitle} setTimerTitle={setTimerTitle} startTimer={startTimer} pauseTimer={pauseTimer} resumeTimer={resumeTimer} stopTimer={stopTimer} activityForm={activityForm} setActivityForm={setActivityForm} markSchedule={markSchedule} onTargetChange={updateScheduleTarget} totals={totals} />}
-      {view === "Ambitions" && <Ambitions token={token} />}
+      {view === "Ambitions" && <Ambitions token={token} timeZone={timezone} />}
       {view === "Tasks" && <TasksView token={token} />}
       {view === "Routine" && <RoutineView date={scheduleDate} routines={data.routines} habits={data.habits} targets={data.targets} onCreate={createRoutine} onGenerate={generateRoutine} />}
       {view === "Schedule" && <PlannerView token={token} timezone={timezone} date={scheduleDate} schedule={data.schedule} targets={data.targets} onDateChange={async (next) => { setScheduleDate(next); await loadScheduleFor(next); }} onRangeChange={loadScheduleRange} onCreate={createSchedule} onUpdate={(item, patch) => updateSchedule(item, patch, scheduleDate)} onDelete={item => deleteSchedule(item, scheduleDate)} onStart={startSchedule} />}
