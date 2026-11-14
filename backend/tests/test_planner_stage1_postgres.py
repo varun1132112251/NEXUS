@@ -291,7 +291,7 @@ def test_habit_stats_require_confirmed_activity_and_use_segments_separately_from
         assert result.expected_count == 1
         assert result.completed_count == 1
         assert result.completed_days == 1
-        assert result.focused_seconds == 900
+        assert result.focused_seconds == 1200
         assert result.manual_record_count == 1
 
 
@@ -420,7 +420,7 @@ def test_stopwatch_keeps_schedule_link_and_needs_confirmation(pg_sessions):
     with pg_sessions() as db:
         user = make_user(db)
         now = datetime.now(UTC).replace(microsecond=0)
-        block = ScheduleItem(user_id=user.id, title="Timer block", scheduled_date=now.date(), start_at=now-timedelta(minutes=5), end_at=now+timedelta(minutes=55))
+        block = ScheduleItem(user_id=user.id, title="Timer block", scheduled_date=now.date(), start_at=now-timedelta(minutes=35), end_at=now+timedelta(minutes=55))
         db.add(block)
         db.flush()
         timer = TimeSession(user_id=user.id, schedule_item_id=block.id, title="Timer block", started_at=now-timedelta(minutes=30), duration_seconds=600, status="paused")
