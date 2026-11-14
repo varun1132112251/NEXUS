@@ -20,6 +20,8 @@ from app.models import (
     ActivityEvent,
     ActivityGoalContribution,
     ActivitySession,
+    ActivitySessionEvent,
+    ActivitySessionLineage,
     ActivitySource,
     ScheduleItem,
     Target,
@@ -28,6 +30,11 @@ from app.models import (
 )
 from app.services.activity_contributions import allocate_time
 from app.services.activity_sources import InvalidDeviceCredential, ingest_device_event
+from app.services.activity_review import draft_from_application_end
+from app.schemas.time_session import TimeSessionStart
+from app.schemas.activity_session import MergeRequest, SplitRequest
+import app.api.v1.routes.time_sessions as time_session_routes
+import app.api.v1.routes.activity_sessions as activity_session_routes
 from app.models.activity_source import issue_credential
 
 
@@ -466,7 +473,7 @@ def test_postgres_cross_user_fks_reject_and_same_user_nullable_link_can_be_unlin
                 db.flush()
     with pg_sessions.begin() as db:
         schedule = db.get(ScheduleItem, ids[4]); schedule.task_id = None; db.flush()
-        db.delete(db.get(Task, ids[3]))
+        db.get(Task, ids[3]).deleted_at = datetime.now(UTC)
 
 
 def test_postgres_invalid_session_timestamps_and_credited_duration(pg_sessions):
@@ -506,6 +513,124 @@ def test_postgres_duplicate_event_and_correction_immutability(pg_sessions):
             with pytest.raises(SQLAlchemyError):
                 with db.begin_nested():
                     db.execute(statement)
+
+
+def test_postgres_observed_session_retains_same_user_event_evidence(pg_sessions):
+    start_at = datetime.now(UTC) - timedelta(minutes=2)
+    with pg_sessions.begin() as db:
+        user = User(id=uuid4(), username=f"event-{uuid4()}", email=f"{uuid4()}@example.test", password_hash="unused")
+        source = ActivitySource(user_id=user.id, name="Windows", source_type="windows", credential_hash=uuid4().hex)
+        db.add(user)
+        db.flush()
+        db.add(source)
+        db.flush()
+        start_event = ActivityEvent(user_id=user.id, source_id=source.id, external_event_id="started", event_type="app_focus", occurred_at=start_at, confidence=1.0, payload={"application": "code.exe", "process_id": 7, "transition": "started"})
+        end_event = ActivityEvent(user_id=user.id, source_id=source.id, external_event_id="ended", event_type="app_focus", occurred_at=start_at + timedelta(seconds=30), confidence=1.0, payload={"application": "code.exe", "process_id": 7, "transition": "ended", "started_at": start_at.isoformat(), "duration_seconds": 30})
+        db.add_all([start_event, end_event])
+        db.flush()
+        draft = draft_from_application_end(db, end_event)
+        assert draft is not None and draft.status == "draft" and draft.source_kind == "observed"
+        evidence_ids = set(db.scalars(select(ActivitySessionEvent.activity_event_id).where(ActivitySessionEvent.activity_session_id == draft.id, ActivitySessionEvent.user_id == user.id)).all())
+        assert evidence_ids == {start_event.id, end_event.id}
+        other_user = User(id=uuid4(), username=f"other-{uuid4()}", email=f"{uuid4()}@example.test", password_hash="unused")
+        db.add(other_user)
+        db.flush()
+        other_source = ActivitySource(user_id=other_user.id, name="Other device", source_type="windows", credential_hash=uuid4().hex)
+        db.add(other_source)
+        db.flush()
+        other_event = ActivityEvent(user_id=other_user.id, source_id=other_source.id, external_event_id="other", event_type="app_focus", occurred_at=start_at)
+        db.add(other_event)
+        db.flush()
+        with pytest.raises(IntegrityError):
+            with db.begin_nested():
+                db.add(ActivitySessionEvent(activity_session_id=draft.id, activity_event_id=other_event.id, user_id=user.id))
+                db.flush()
+
+
+def test_postgres_split_conserves_duration_allocations_and_evidence(pg_sessions):
+    with pg_sessions.begin() as db:
+        user, target, _, parent = make_activity(db, duration=100)
+        start = parent.started_at
+        source = ActivitySource(user_id=user.id, name="split source", source_type="windows", credential_hash=uuid4().hex)
+        db.add(source)
+        db.flush()
+        evidence = ActivityEvent(user_id=user.id, source_id=source.id, external_event_id="split-event", event_type="app_focus", occurred_at=start)
+        db.add(evidence)
+        db.flush()
+        db.add(ActivitySessionEvent(activity_session_id=parent.id, activity_event_id=evidence.id, user_id=user.id))
+        db.add(ActivityGoalContribution(user_id=user.id, activity_session_id=parent.id, target_id=target.id, contribution_type="time", contribution_value=Decimal(80), unit="seconds"))
+        parent_id, user_id, event_id = parent.id, user.id, evidence.id
+        split_at = parent.started_at + timedelta(seconds=50)
+    with pg_sessions() as db:
+        children = activity_session_routes.split_session(parent_id, SplitRequest(split_at=split_at, reason="Separate two activities"), db, db.get(User, user_id))
+        assert sum(child.duration_seconds for child in children) == 100
+        allocated = sum((db.scalar(select(func.coalesce(func.sum(ActivityGoalContribution.contribution_value), 0)).where(ActivityGoalContribution.activity_session_id == child.id, ActivityGoalContribution.contribution_type == "time")) for child in children), Decimal(0))
+        assert allocated == Decimal(80)
+        assert db.scalar(select(ActivitySession.status).where(ActivitySession.id == parent_id)) == "superseded"
+        assert db.scalar(select(func.count()).select_from(ActivitySessionLineage).where(ActivitySessionLineage.parent_session_id == parent_id, ActivitySessionLineage.operation == "split")) == 2
+        assert all(db.scalar(select(func.count()).select_from(ActivitySessionEvent).where(ActivitySessionEvent.activity_session_id == child.id, ActivitySessionEvent.activity_event_id == event_id)) == 1 for child in children)
+        assert db.scalar(select(func.count()).select_from(ActivityCorrection).where(ActivityCorrection.activity_session_id == parent_id)) >= 2
+
+
+def test_postgres_merge_preserves_both_sources_and_time_allocations(pg_sessions):
+    with pg_sessions.begin() as db:
+        user, target, _, first = make_activity(db, duration=40)
+        second_start = first.ended_at + timedelta(seconds=10)
+        second = ActivitySession(user_id=user.id, title="second segment", started_at=second_start, ended_at=second_start + timedelta(seconds=60), duration_seconds=60, status="confirmed")
+        db.add(second)
+        source = ActivitySource(user_id=user.id, name="merge source", source_type="windows", credential_hash=uuid4().hex)
+        db.add(source)
+        db.flush()
+        first_event = ActivityEvent(user_id=user.id, source_id=source.id, external_event_id="merge-one", event_type="app_focus", occurred_at=first.started_at)
+        second_event = ActivityEvent(user_id=user.id, source_id=source.id, external_event_id="merge-two", event_type="app_focus", occurred_at=second_start)
+        db.add_all([first_event, second_event])
+        db.flush()
+        db.add_all([
+            ActivitySessionEvent(activity_session_id=first.id, activity_event_id=first_event.id, user_id=user.id),
+            ActivitySessionEvent(activity_session_id=second.id, activity_event_id=second_event.id, user_id=user.id),
+            ActivityGoalContribution(user_id=user.id, activity_session_id=first.id, target_id=target.id, contribution_type="time", contribution_value=Decimal(30), unit="seconds"),
+            ActivityGoalContribution(user_id=user.id, activity_session_id=second.id, target_id=target.id, contribution_type="time", contribution_value=Decimal(40), unit="seconds"),
+        ])
+        first_id, second_id, user_id = first.id, second.id, user.id
+        event_ids = {first_event.id, second_event.id}
+    with pg_sessions() as db:
+        result = activity_session_routes.merge_session(first_id, MergeRequest(other_session_id=second_id, reason="Same project work"), db, db.get(User, user_id))
+        assert result.duration_seconds == 100
+        actual_events = set(db.scalars(select(ActivitySessionEvent.activity_event_id).where(ActivitySessionEvent.activity_session_id == result.id)).all())
+        assert actual_events == event_ids
+        assert db.scalar(select(func.sum(ActivityGoalContribution.contribution_value)).where(ActivityGoalContribution.activity_session_id == result.id, ActivityGoalContribution.contribution_type == "time")) == Decimal(70)
+        assert db.scalar(select(func.count()).select_from(ActivitySessionLineage).where(ActivitySessionLineage.child_session_id == result.id, ActivitySessionLineage.operation == "merge")) == 2
+        assert db.scalar(select(func.count()).select_from(ActivityCorrection).where(ActivityCorrection.field_name == "status", ActivityCorrection.activity_session_id.in_([first_id, second_id]))) == 2
+
+
+def test_postgres_stopwatch_pause_resume_excludes_paused_time_and_recovers_state(pg_sessions, monkeypatch):
+    start_at = datetime(2026, 11, 1, 10, tzinfo=UTC)
+    clock = [start_at]
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return clock[0].astimezone(tz) if tz else clock[0].replace(tzinfo=None)
+
+    monkeypatch.setattr(time_session_routes, "datetime", FrozenDateTime)
+    with pg_sessions.begin() as db:
+        user = User(id=uuid4(), username=f"timer-{uuid4()}", email=f"{uuid4()}@example.test", password_hash="unused")
+        db.add(user)
+    with pg_sessions() as db:
+        started = time_session_routes.start(TimeSessionStart(title="Swimming"), db, user)
+        session_id = started.id
+        clock[0] += timedelta(minutes=2)
+        paused = time_session_routes.pause(session_id, db, user)
+        assert paused.status == "paused" and paused.elapsed_seconds == 120
+        clock[0] += timedelta(hours=1)
+        assert time_session_routes.current(db, user).status == "paused"
+        resumed = time_session_routes.resume(session_id, db, user)
+        assert resumed.status == "running" and resumed.elapsed_seconds == 120
+        clock[0] += timedelta(minutes=1)
+        stopped = time_session_routes.stop(session_id, db, user)
+        assert stopped.status == "completed" and stopped.duration_seconds == 180
+        reviewed = db.scalar(select(ActivitySession).where(ActivitySession.time_session_id == session_id, ActivitySession.user_id == user.id))
+        assert reviewed is not None and reviewed.status == "draft" and reviewed.source_kind == "stopwatch"
 
 
 def test_postgres_revoked_ingestion_rejected_and_row_lock_serializes_revocation(pg_sessions, monkeypatch):

@@ -37,6 +37,11 @@ class HabitRead(BaseModel):
 
 
 class HabitStatsRead(BaseModel):
+    """Expected-day denominator; completion days come only from confirmed/corrected ActivitySessions.
+
+    focused_seconds is the union of eligible manual-session intervals and stopwatch segments.
+    ActivityRecord rows are exposed separately as manual_record_count and do not imply completion.
+    """
     habit_id: UUID
     expected_count: int
     completed_count: int
@@ -44,5 +49,6 @@ class HabitStatsRead(BaseModel):
     current_streak: int
     best_streak: int
     focused_seconds: int
+    manual_record_count: int = 0
     completed_days: int
     last_completed_date: date | None

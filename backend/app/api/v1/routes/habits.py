@@ -10,13 +10,14 @@ from app.db.session import get_db
 from app.models.activity_record import ActivityRecord
 from app.models.habit import Habit
 from app.models.schedule import ScheduleItem
-from app.models.time_session import TimeSession
+from app.models.activity_session import ActivitySession
+from app.models.time_session_segment import TimeSessionSegment
 from app.models.user import User
 from app.schemas.habit import HabitCreate, HabitRead, HabitStatsRead, HabitUpdate
 from app.services.ownership import unlink_owned_references
+from app.services.planner import user_timezone
 
 router = APIRouter(prefix="/habits", tags=["habits"])
-LOCAL_TZ = __import__("zoneinfo").ZoneInfo("Asia/Kolkata")
 
 
 def owned(db: Session, habit_id, user_id):
@@ -26,10 +27,10 @@ def owned(db: Session, habit_id, user_id):
     return habit
 
 
-def local_day(dt: datetime) -> date:
+def local_day(dt: datetime, timezone) -> date:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=UTC)
-    return dt.astimezone(LOCAL_TZ).date()
+    return dt.astimezone(timezone).date()
 
 
 def consecutive_streak(days: set[date], anchor: date | None = None) -> int:
@@ -74,8 +75,8 @@ def best_calendar_streak(days: set[date]) -> int:
         previous = day
     return best
 
-def expected_days(habit: Habit, start: date, end: date, scheduled: set[date]) -> set[date]:
-    if scheduled:
+def expected_days(habit: Habit, start: date, end: date, scheduled: set[date], *, has_schedule: bool = False) -> set[date]:
+    if has_schedule:
         return scheduled
     if habit.frequency.lower() == "daily":
         return {start + timedelta(days=i) for i in range((end - start).days + 1)}
@@ -109,55 +110,73 @@ def stats(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    end = end_date or datetime.now(LOCAL_TZ).date()
+    timezone = user_timezone(db, user.id)
+    end = end_date or datetime.now(timezone).date()
     start = start_date or (end - timedelta(days=29))
     if end < start:
         raise HTTPException(422, "end_date must be on or after start_date.")
+    if (end - start).days > 365:
+        raise HTTPException(422, "Habit statistics range cannot exceed 366 calendar days.")
 
     habits = list(db.scalars(select(Habit).where(Habit.user_id == user.id)).all())
     schedules = list(db.scalars(select(ScheduleItem).where(
         ScheduleItem.user_id == user.id,
+        ScheduleItem.deleted_at.is_(None),
         ScheduleItem.habit_id.is_not(None),
         ScheduleItem.scheduled_date >= start,
         ScheduleItem.scheduled_date <= end,
     )).all())
-    sessions = list(db.scalars(select(TimeSession).where(
-        TimeSession.user_id == user.id,
-        TimeSession.habit_id.is_not(None),
-        TimeSession.status == "completed",
-        TimeSession.started_at < datetime.combine(end + timedelta(days=1), datetime.min.time(), LOCAL_TZ),
+    sessions = list(db.scalars(select(ActivitySession).where(
+        ActivitySession.user_id == user.id,
+        ActivitySession.habit_id.is_not(None),
+        ActivitySession.status.in_(("confirmed", "corrected")),
+        ActivitySession.started_at < datetime.combine(end + timedelta(days=1), datetime.min.time(), timezone).astimezone(UTC),
+        ActivitySession.ended_at.is_not(None),
+        ActivitySession.ended_at >= datetime.combine(start, datetime.min.time(), timezone).astimezone(UTC),
     )).all())
     activities = list(db.scalars(select(ActivityRecord).where(
         ActivityRecord.user_id == user.id,
         ActivityRecord.habit_id.is_not(None),
-        ActivityRecord.recorded_at >= datetime.combine(start, datetime.min.time(), LOCAL_TZ),
-        ActivityRecord.recorded_at < datetime.combine(end + timedelta(days=1), datetime.min.time(), LOCAL_TZ),
+        ActivityRecord.recorded_at >= datetime.combine(start, datetime.min.time(), timezone).astimezone(UTC),
+        ActivityRecord.recorded_at < datetime.combine(end + timedelta(days=1), datetime.min.time(), timezone).astimezone(UTC),
     )).all())
 
     schedule_by_habit: dict[UUID, set[date]] = {}
+    scheduled_habits: set[UUID] = set()
     completed_by_habit: dict[UUID, set[date]] = {}
-    focused_by_habit: dict[UUID, int] = {}
+    focused_intervals: dict[UUID, list[tuple[datetime, datetime]]] = {}
 
     for item in schedules:
-        schedule_by_habit.setdefault(item.habit_id, set()).add(item.scheduled_date)
-        if item.status == "completed":
-            completed_by_habit.setdefault(item.habit_id, set()).add(item.scheduled_date)
-
+        scheduled_habits.add(item.habit_id)
+        if item.status != "cancelled":
+            schedule_by_habit.setdefault(item.habit_id, set()).add(item.scheduled_date)
     for session in sessions:
-        day = local_day(session.started_at)
-        if start <= day <= end:
-            completed_by_habit.setdefault(session.habit_id, set()).add(day)
-            focused_by_habit[session.habit_id] = focused_by_habit.get(session.habit_id, 0) + (session.duration_seconds or 0)
-
-    for activity in activities:
-        day = local_day(activity.recorded_at)
-        if start <= day <= end:
-            completed_by_habit.setdefault(activity.habit_id, set()).add(day)
+        intervals = []
+        if session.time_session_id is not None:
+            intervals = [(row.started_at, row.ended_at) for row in db.scalars(select(TimeSessionSegment).where(
+                TimeSessionSegment.time_session_id == session.time_session_id,
+                TimeSessionSegment.user_id == user.id,
+                TimeSessionSegment.ended_at.is_not(None),
+            )).all() if row.ended_at > row.started_at]
+        elif session.duration_seconds and session.duration_seconds > 0:
+            intervals = [(session.started_at, session.started_at + timedelta(seconds=session.duration_seconds))]
+        habit_intervals = focused_intervals.setdefault(session.habit_id, [])
+        for interval_start, interval_end in intervals:
+            cursor = max(interval_start, datetime.combine(start, datetime.min.time(), timezone).astimezone(UTC))
+            clipped_end = min(interval_end, datetime.combine(end + timedelta(days=1), datetime.min.time(), timezone).astimezone(UTC))
+            while cursor < clipped_end:
+                day = local_day(cursor, timezone)
+                next_midnight = datetime.combine(day + timedelta(days=1), datetime.min.time(), timezone).astimezone(UTC)
+                part_end = min(clipped_end, next_midnight)
+                if start <= day <= end:
+                    completed_by_habit.setdefault(session.habit_id, set()).add(day)
+                    habit_intervals.append((cursor, part_end))
+                cursor = part_end
 
     result = []
     for habit in habits:
         scheduled_days = schedule_by_habit.get(habit.id, set())
-        expected = expected_days(habit, start, end, scheduled_days)
+        expected = expected_days(habit, start, end, scheduled_days, has_schedule=habit.id in scheduled_habits)
         completed = completed_by_habit.get(habit.id, set()) & set(
             start + timedelta(days=i) for i in range((end - start).days + 1)
         )
@@ -179,17 +198,32 @@ def stats(
             consistency_percent=consistency,
             current_streak=current,
             best_streak=best,
-            focused_seconds=focused_by_habit.get(habit.id, 0),
+            focused_seconds=sum(
+                max(0, int((right - left).total_seconds()))
+                for left, right in _merge_intervals(focused_intervals.get(habit.id, []))
+            ),
+            manual_record_count=sum(1 for row in activities if row.habit_id == habit.id),
             completed_days=len(completed_expected),
             last_completed_date=max(completed_expected) if completed_expected else None,
         ))
     return result
 
 
+def _merge_intervals(intervals: list[tuple[datetime, datetime]]) -> list[tuple[datetime, datetime]]:
+    merged: list[list[datetime]] = []
+    for left, right in sorted(intervals):
+        if right <= left:
+            continue
+        if not merged or left > merged[-1][1]:
+            merged.append([left, right])
+        elif right > merged[-1][1]:
+            merged[-1][1] = right
+    return [(left, right) for left, right in merged]
+
+
 @router.patch("/{habit_id}", response_model=HabitRead)
 def update(habit_id: UUID, payload: HabitUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     x = owned(db, habit_id, user.id)
-    unlink_owned_references(db, Habit, x.id, user.id)
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(x, k, v)
     db.commit()

@@ -1,6 +1,9 @@
 from datetime import date
 
-from app.schemas.analytics import AnalyticsDay, AnalyticsSummary, AnalyticsTotals, ActivityBreakdown
+from app.schemas.analytics import (
+    AnalyticsDay, AnalyticsSummary, AnalyticsTotals, ActivityBreakdown,
+    DailyActualSummary, DailyDataQuality, DailyPlannedSummary, DailyReflection, DailyReport,
+)
 
 
 def test_analytics_summary_accepts_activity_breakdown() -> None:
@@ -69,3 +72,31 @@ def test_analytics_totals_accept_time_execution_rate() -> None:
         diary_days=1,
     )
     assert totals.time_execution_rate == 50.0
+
+
+def test_daily_report_contract_accepts_empty_profile_local_day() -> None:
+    payload = DailyReport(
+        date=date(2026, 11, 14), timezone="Asia/Kolkata",
+        planned=DailyPlannedSummary(
+            planned_seconds=0, scheduled_blocks=0, completed_blocks=0, partial_blocks=0,
+            skipped_blocks=0, missed_blocks=0, cancelled_blocks=0, planned_tasks=0,
+            completed_tasks=0, in_progress_tasks=0, blocked_tasks=0, cancelled_tasks=0,
+        ),
+        actual=DailyActualSummary(
+            confirmed_seconds=0, corrected_seconds=0, actual_seconds=0, draft_seconds=0,
+            allocated_seconds=0, unallocated_seconds=0, outside_planned_seconds=0,
+            ambiguous_seconds=0, overlapping_actual_seconds=0, ambiguous_allocation_seconds=0,
+            confirmed_session_count=0, corrected_session_count=0, unavailable_legacy_seconds=0,
+        ),
+        activities=[], historical_activities=[], goal_contributions=[], goal_progress_history=[],
+        tasks=[], schedule=[], task_history=[], schedule_history=[], activity_corrections=[],
+        reflection=DailyReflection(available=False),
+        data_quality=DailyDataQuality(
+            draft_session_count=0, discarded_session_count=0, superseded_session_count=0,
+            unlinked_observation_count=0, legacy_activity_record_count=0,
+            unavailable_legacy_seconds=0, ambiguous_allocation_seconds=0,
+        ),
+    )
+    assert payload.timezone == "Asia/Kolkata"
+    assert payload.actual.actual_seconds == 0
+    assert payload.reflection.available is False

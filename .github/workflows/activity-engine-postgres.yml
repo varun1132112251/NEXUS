@@ -8,6 +8,7 @@ on:
   push:
     branches:
       - v1.3/activity-engine-foundation
+      - validation/batch-5-2-postgres
 
 permissions:
   contents: read
@@ -57,6 +58,10 @@ jobs:
             tests/test_activity_migration_postgres.py \
             tests/test_activity_contributions.py \
             tests/test_activity_source_api.py \
+            tests/test_ambitions_postgres.py \
+            tests/test_planner_stage1_postgres.py \
+            tests/test_planner_migration_postgres.py \
+            tests/test_target_deletion_postgres.py \
             -v \
             --junitxml=activity-postgres-results.xml
           pytest_status=$?
@@ -88,3 +93,25 @@ jobs:
           if int(sys.argv[2]) != 0 or failed or skipped:
               sys.exit(1)
           PY
+
+      - name: Run analytics and activity contract tests
+        working-directory: backend
+        run: pytest tests/test_analytics.py tests/test_activity_session_contracts.py -v
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run frontend tests
+        working-directory: frontend
+        run: npm test
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build

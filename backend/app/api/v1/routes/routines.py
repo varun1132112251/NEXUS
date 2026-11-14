@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -15,6 +15,10 @@ from app.models.task import Task
 from app.models.target import Target
 from app.models.schedule import ScheduleItem
 from app.schemas.routine_template import RoutineGenerateRead, RoutineTemplateCreate, RoutineTemplateRead, RoutineTemplateUpdate
+from app.services.planner import (
+    localize_planner_datetime, reject_schedule_conflict, schedule_conflicts,
+    lock_user_schedule, user_timezone,
+)
 
 router = APIRouter(prefix="/routines", tags=["routines"])
 
@@ -44,8 +48,11 @@ def create(payload: RoutineTemplateCreate, db: Session = Depends(get_db), user: 
 
 
 @router.get("", response_model=list[RoutineTemplateRead])
-def list_routines(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    query = select(RoutineTemplate).where(RoutineTemplate.user_id == user.id, RoutineTemplate.active.is_(True)).order_by(RoutineTemplate.start_time)
+def list_routines(include_inactive: bool = False, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    query = select(RoutineTemplate).where(RoutineTemplate.user_id == user.id)
+    if not include_inactive:
+        query = query.where(RoutineTemplate.active.is_(True))
+    query = query.order_by(RoutineTemplate.start_time)
     return list(db.scalars(query).all())
 
 
@@ -64,12 +71,15 @@ def update(routine_id: UUID, payload: RoutineTemplateUpdate, db: Session = Depen
 @router.delete("/{routine_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete(routine_id: UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     item = owned(db, RoutineTemplate, routine_id, user.id)
-    db.delete(item)
+    # Deactivation preserves source identity referenced by generated occurrences.
+    item.active = False
     db.commit()
 
 
 @router.post("/generate/{target_date}", response_model=RoutineGenerateRead)
-def generate(target_date: date, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def generate(target_date: date, db: Session = Depends(get_db), user: User = Depends(get_current_user), allow_conflict: bool = False):
+    lock_user_schedule(db, user.id)
+    timezone = user_timezone(db, user.id)
     weekday = target_date.weekday()
     templates = list(db.scalars(
         select(RoutineTemplate).where(
@@ -85,21 +95,23 @@ def generate(target_date: date, db: Session = Depends(get_db), user: User = Depe
             ScheduleItem.scheduled_date == target_date,
         )
     ).all())
-    existing_keys = {(x.title, x.start_at.time(), x.end_at.time(), x.habit_id, x.target_id) for x in existing}
+    existing_ids = {x.routine_template_id for x in existing if x.routine_template_id is not None}
 
     created = 0
     for template in templates:
-        start_at = datetime.combine(target_date, template.start_time)
-        end_at = datetime.combine(target_date, template.end_time)
-        key = (template.title, template.start_time, template.end_time, template.habit_id, template.target_id)
-        if key in existing_keys:
+        start_at = localize_planner_datetime(datetime.combine(target_date, template.start_time), timezone)
+        end_at = localize_planner_datetime(datetime.combine(target_date, template.end_time), timezone)
+        if template.id in existing_ids:
             continue
+        conflicts = schedule_conflicts(db, user_id=user.id, start_at=start_at, end_at=end_at)
+        reject_schedule_conflict(conflicts, allow_conflict)
         db.add(ScheduleItem(
             user_id=user.id,
             task_id=template.task_id,
             habit_id=template.habit_id,
             project_id=template.project_id,
             target_id=template.target_id,
+            routine_template_id=template.id,
             title=template.title,
             notes=template.notes,
             scheduled_date=target_date,
@@ -108,6 +120,7 @@ def generate(target_date: date, db: Session = Depends(get_db), user: User = Depe
             priority=template.priority,
             status="planned",
         ))
+        db.flush()
         created += 1
 
     db.commit()

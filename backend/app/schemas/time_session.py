@@ -31,3 +31,5 @@ class TimeSessionRead(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
+    elapsed_seconds: int | None = None
+    elapsed_seconds: int | None = None

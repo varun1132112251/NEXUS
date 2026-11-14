@@ -25,6 +25,10 @@ class ConcurrentStartSession:
     def add(self, item) -> None:
         self.pending = item
 
+    def flush(self) -> None:
+        if getattr(self.pending, "id", None) is None:
+            self.pending.id = uuid4()
+
     def commit(self) -> None:
         raise IntegrityError("INSERT time_sessions", {}, Exception("unique index"))
 

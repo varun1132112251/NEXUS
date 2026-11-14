@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models.activity_goal_contribution import ActivityGoalContribution
 from app.models.activity_session import ActivitySession
+from app.models.ambition_goal import AmbitionGoal
 from app.models.habit import Habit
 from app.models.project import Project
 from app.models.schedule import ScheduleItem
@@ -25,6 +26,7 @@ def unlink_owned_references(db: Session, model: type, item_id: UUID, user_id: UU
         Project: (
             (Task, "project_id"), (ScheduleItem, "project_id"),
             (TimeSession, "project_id"), (ActivitySession, "project_id"),
+            (AmbitionGoal, "supporting_project_id"),
         ),
         Habit: ((ScheduleItem, "habit_id"), (TimeSession, "habit_id"), (ActivitySession, "habit_id")),
         ScheduleItem: ((TimeSession, "schedule_item_id"), (ActivitySession, "schedule_item_id")),
@@ -34,6 +36,15 @@ def unlink_owned_references(db: Session, model: type, item_id: UUID, user_id: UU
         select(ActivityGoalContribution.id).where(ActivityGoalContribution.target_id == item_id).limit(1)
     ) is not None:
         raise ReferencedTargetError("Target has contribution history and cannot be deleted")
+    if model is Target and db.scalar(
+        select(ActivitySession.id).where(
+            ActivitySession.user_id == user_id,
+            ActivitySession.target_id == item_id,
+        ).limit(1)
+    ) is not None:
+        raise ReferencedTargetError(
+            "Target is linked to historical activity and cannot be deleted while that association remains."
+        )
 
     for child_model, column_name in references.get(model, ()):
         column = getattr(child_model, column_name)

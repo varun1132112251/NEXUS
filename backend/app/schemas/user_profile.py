@@ -1,7 +1,8 @@
 from datetime import datetime
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class UserProfileUpdate(BaseModel):
@@ -15,6 +16,15 @@ class UserProfileUpdate(BaseModel):
     availability: dict | None = None
     preferences: dict | None = None
     onboarding_completed: bool = False
+
+    @field_validator("timezone")
+    @classmethod
+    def valid_iana_timezone(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError("timezone must be an IANA timezone name") from exc
+        return value
 
 
 class UserProfileRead(UserProfileUpdate):
