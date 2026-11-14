@@ -291,7 +291,9 @@ def test_habit_stats_require_confirmed_activity_and_use_segments_separately_from
         assert result.expected_count == 1
         assert result.completed_count == 1
         assert result.completed_days == 1
-        assert result.focused_seconds == 900
+        # The verified timer has 900 active seconds; the corrected manual interval
+        # overlaps the first five minutes and adds five unique minutes, for 1,200 total.
+        assert result.focused_seconds == 1200
         assert result.manual_record_count == 1
 
 
@@ -457,6 +459,13 @@ def test_daily_report_unifies_profile_local_execution_without_double_counting(pg
         assert len(report.historical_activities) == 1
         assert {item.status for item in report.activities} >= {"confirmed", "corrected", "draft"}
         assert len(report.goal_contributions) == 1
+        summary = analytics_routes.summary(day, day, db, user)
+        execution = schedule_routes.execution_summary(day, day, db, user)
+        assert report.actual.actual_seconds == summary.daily[0].actual_seconds == execution.totals.confirmed_actual_seconds
+        assert report.planned.planned_seconds == summary.daily[0].planned_seconds == execution.totals.planned_seconds
+        assert report.actual.outside_planned_seconds == execution.totals.outside_planned_seconds
+        assert report.actual.allocated_seconds == summary.totals.allocated_seconds
+        assert report.actual.unallocated_seconds == summary.totals.unallocated_seconds
         assert len(report.schedule) == 2
         assert len(report.schedule_history) >= 2
         assert len(report.task_history) >= 2
@@ -608,11 +617,18 @@ def test_planned_vs_confirmed_actual_union_and_explicit_association(pg_sessions)
         assert first.schedule_item_id == block.id
 
 
-def test_stopwatch_keeps_schedule_link_and_needs_confirmation(pg_sessions):
+def test_stopwatch_keeps_schedule_link_and_needs_confirmation(pg_sessions, monkeypatch):
     with pg_sessions() as db:
         user = make_user(db)
-        now = datetime.now(UTC).replace(microsecond=0)
-        block = ScheduleItem(user_id=user.id, title="Timer block", scheduled_date=now.date(), start_at=now-timedelta(minutes=5), end_at=now+timedelta(minutes=55))
+        now = datetime(2026, 6, 5, 12, tzinfo=UTC)
+
+        class FrozenDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return now if tz is not None else now.replace(tzinfo=None)
+
+        monkeypatch.setattr(timer_routes, "datetime", FrozenDateTime)
+        block = ScheduleItem(user_id=user.id, title="Timer block", scheduled_date=now.date(), start_at=now-timedelta(minutes=35), end_at=now+timedelta(minutes=25))
         db.add(block)
         db.flush()
         timer = TimeSession(user_id=user.id, schedule_item_id=block.id, title="Timer block", started_at=now-timedelta(minutes=30), duration_seconds=600, status="paused")
