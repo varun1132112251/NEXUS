@@ -171,9 +171,9 @@ def test_period_totals_reconcile_and_goal_history_keeps_corrections_and_reversal
         history = analytics_routes.goal_history(goal.id, date(2026, 11, 9), date(2026, 11, 15), db, user)
         assert history.starting_value is None
         assert history.starting_value_status == "not_recorded"
-        assert history.progress_entries[0].resulting_value == "2.0000"
+        assert Decimal(history.progress_entries[0].resulting_value) == Decimal("2")
         assert history.progress_entries[1].corrects_entry_id == str(entry.id)
-        assert history.contributions[0].value == "1.0000"
+        assert Decimal(history.contributions[0].value) == Decimal("1")
         assert history.contributions[0].reversed_at is not None
         with pytest.raises(HTTPException) as denied:
             analytics_routes.goal_history(other_goal.id, None, None, db, user)
