@@ -69,11 +69,13 @@ def test_empty_week_and_leap_month_use_calendar_periods_and_zero_baselines(pg_se
         assert empty_week.comparison["confirmed_actual_seconds"].previous == 0
         assert empty_week.comparison["confirmed_actual_seconds"].percent_change is None
 
+        db.add(DiaryEntry(user_id=user.id, entry_date=date(2024, 1, 31), learned="Previous calendar month"))
         leap_month = analytics_routes.monthly_report("2024-02", db, user)
         assert leap_month.start_date == date(2024, 2, 1)
         assert leap_month.end_date == date(2024, 2, 29)
         assert len(leap_month.daily) == 29
         assert leap_month.reflection_coverage_percent == 0
+        assert leap_month.comparison["reflection_days"].previous == 1
         assert len(analytics_routes.monthly_report("2023-02", db, user).daily) == 28
         assert len(analytics_routes.monthly_report("2026-11", db, user).daily) == 30
 
@@ -171,6 +173,10 @@ def test_period_totals_reconcile_and_goal_history_keeps_corrections_and_reversal
         history = analytics_routes.goal_history(goal.id, date(2026, 11, 9), date(2026, 11, 15), db, user)
         assert history.starting_value is None
         assert history.starting_value_status == "not_recorded"
+        assert not history.goal_status_history_available
+        assert not history.milestone_status_history_available
+        assert any("milestone reopen/recompletion" in value for value in history.limitations)
+        assert any("Targets retain current values" in value for value in history.limitations)
         assert Decimal(history.progress_entries[0].resulting_value) == Decimal("2")
         assert history.progress_entries[1].corrects_entry_id == str(entry.id)
         assert Decimal(history.contributions[0].value) == Decimal("1")
